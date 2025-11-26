@@ -2,50 +2,50 @@
 @tailwind components;
 @tailwind utilities;
 
-/* LIGHT MODE */
+/* LIGHT MODE - Trading Theme with Blue/Professional accents */
 :root {
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
   --opaque-button-border-intensity: -8;
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
-  --background: 0 0% 100%;
-  --foreground: 0 0% 9%;
-  --border: 0 0% 91%;
-  --card: 0 0% 98%;
-  --card-foreground: 0 0% 9%;
-  --card-border: 0 0% 94%;
-  --sidebar: 0 0% 96%;
-  --sidebar-foreground: 0 0% 9%;
-  --sidebar-border: 0 0% 92%;
-  --sidebar-primary: 217 91% 35%;
-  --sidebar-primary-foreground: 217 91% 98%;
-  --sidebar-accent: 217 12% 88%;
-  --sidebar-accent-foreground: 217 12% 15%;
-  --sidebar-ring: 217 91% 35%;
-  --popover: 0 0% 94%;
-  --popover-foreground: 0 0% 9%;
-  --popover-border: 0 0% 90%;
-  --primary: 217 91% 35%;
-  --primary-foreground: 217 91% 98%;
-  --secondary: 217 8% 86%;
-  --secondary-foreground: 217 8% 15%;
-  --muted: 217 6% 90%;
-  --muted-foreground: 217 6% 35%;
-  --accent: 217 10% 92%;
-  --accent-foreground: 217 10% 15%;
-  --destructive: 0 84% 32%;
-  --destructive-foreground: 0 84% 98%;
-  --input: 0 0% 75%;
-  --ring: 217 91% 35%;
-  --chart-1: 217 91% 35%;
-  --chart-2: 142 76% 28%;
-  --chart-3: 38 92% 45%;
-  --chart-4: 280 87% 35%;
-  --chart-5: 20 90% 38%;
-  --font-sans: Open Sans, sans-serif;
+  --background: 220 20% 97%;
+  --foreground: 220 20% 10%;
+  --border: 220 15% 88%;
+  --card: 220 20% 99%;
+  --card-foreground: 220 20% 10%;
+  --card-border: 220 15% 92%;
+  --sidebar: 220 25% 95%;
+  --sidebar-foreground: 220 20% 10%;
+  --sidebar-border: 220 15% 88%;
+  --sidebar-primary: 217 91% 45%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 217 20% 90%;
+  --sidebar-accent-foreground: 217 20% 15%;
+  --sidebar-ring: 217 91% 45%;
+  --popover: 220 20% 98%;
+  --popover-foreground: 220 20% 10%;
+  --popover-border: 220 15% 88%;
+  --primary: 217 91% 45%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 15% 90%;
+  --secondary-foreground: 220 15% 20%;
+  --muted: 220 12% 92%;
+  --muted-foreground: 220 12% 45%;
+  --accent: 217 25% 92%;
+  --accent-foreground: 217 25% 15%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --input: 220 15% 80%;
+  --ring: 217 91% 45%;
+  --chart-1: 142 71% 45%;
+  --chart-2: 0 72% 51%;
+  --chart-3: 217 91% 60%;
+  --chart-4: 38 92% 50%;
+  --chart-5: 280 65% 60%;
+  --font-sans: Inter, system-ui, sans-serif;
   --font-serif: Georgia, serif;
-  --font-mono: Menlo, monospace;
+  --font-mono: JetBrains Mono, monospace;
   --radius: .5rem;
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.02);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.03);
@@ -57,8 +57,13 @@
   --shadow-2xl: 0px 2px 0px 0px hsl(0 0% 0% / 0.20);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
+  
+  /* Trading specific colors */
+  --profit: 142 71% 45%;
+  --loss: 0 72% 51%;
+  --neutral: 220 12% 50%;
 
-/* Fallback for older browsers */
+  /* Fallback for older browsers */
   --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 
@@ -87,46 +92,53 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
+/* DARK MODE - Professional Trading Terminal Theme */
 .dark {
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
   --opaque-button-border-intensity: 9;
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
-  --background: 0 0% 7%;
-  --foreground: 0 0% 98%;
-  --border: 0 0% 16%;
-  --card: 0 0% 9%;
-  --card-foreground: 0 0% 98%;
-  --card-border: 0 0% 12%;
-  --sidebar: 0 0% 11%;
-  --sidebar-foreground: 0 0% 98%;
-  --sidebar-border: 0 0% 14%;
-  --sidebar-primary: 217 91% 50%;
-  --sidebar-primary-foreground: 217 91% 98%;
-  --sidebar-accent: 217 10% 16%;
-  --sidebar-accent-foreground: 217 10% 90%;
-  --sidebar-ring: 217 91% 50%;
-  --popover: 0 0% 13%;
-  --popover-foreground: 0 0% 98%;
-  --popover-border: 0 0% 16%;
-  --primary: 217 91% 35%;
-  --primary-foreground: 217 91% 98%;
-  --destructive: 0 84% 32%;
-  --destructive-foreground: 0 84% 98%;
-  --secondary: 217 6% 18%;
-  --secondary-foreground: 217 6% 95%;
-  --muted: 217 5% 16%;
-  --muted-foreground: 217 5% 70%;
-  --accent: 217 8% 15%;
-  --accent-foreground: 217 8% 95%;
-  --input: 0 0% 30%;
-  --ring: 217 91% 50%;
-  --chart-1: 217 91% 60%;
-  --chart-2: 142 76% 55%;
-  --chart-3: 38 92% 60%;
-  --chart-4: 280 87% 60%;
-  --chart-5: 20 90% 58%;
+  --background: 222 47% 6%;
+  --foreground: 210 40% 96%;
+  --border: 217 33% 17%;
+  --card: 222 47% 8%;
+  --card-foreground: 210 40% 96%;
+  --card-border: 217 33% 14%;
+  --sidebar: 222 47% 7%;
+  --sidebar-foreground: 210 40% 96%;
+  --sidebar-border: 217 33% 14%;
+  --sidebar-primary: 217 91% 60%;
+  --sidebar-primary-foreground: 222 47% 6%;
+  --sidebar-accent: 217 33% 16%;
+  --sidebar-accent-foreground: 210 40% 90%;
+  --sidebar-ring: 217 91% 60%;
+  --popover: 222 47% 10%;
+  --popover-foreground: 210 40% 96%;
+  --popover-border: 217 33% 17%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 222 47% 6%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --secondary: 217 33% 18%;
+  --secondary-foreground: 210 40% 95%;
+  --muted: 217 33% 14%;
+  --muted-foreground: 215 20% 55%;
+  --accent: 217 33% 16%;
+  --accent-foreground: 210 40% 95%;
+  --input: 217 33% 25%;
+  --ring: 217 91% 60%;
+  --chart-1: 142 71% 50%;
+  --chart-2: 0 72% 55%;
+  --chart-3: 217 91% 65%;
+  --chart-4: 38 92% 55%;
+  --chart-5: 280 65% 65%;
+
+  /* Trading specific colors */
+  --profit: 142 71% 50%;
+  --loss: 0 72% 55%;
+  --neutral: 215 20% 55%;
+
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 100% / 0.02);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 100% / 0.03);
   --shadow-sm: 0px 2px 0px 0px hsl(0 0% 100% / 0.04), 0px 1px 2px -1px hsl(0 0% 100% / 0.06);
@@ -136,7 +148,7 @@
   --shadow-xl: 0px 2px 0px 0px hsl(0 0% 100% / 0.10), 0px 8px 10px -1px hsl(0 0% 100% / 0.15);
   --shadow-2xl: 0px 2px 0px 0px hsl(0 0% 100% / 0.20);
 
-/* Fallback for older browsers */
+  /* Fallback for older browsers */
   --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 
@@ -284,5 +296,53 @@
   .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
+  }
+
+  /* Price flash animations */
+  @keyframes flash-green {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: hsl(var(--profit) / 0.2); }
+  }
+
+  @keyframes flash-red {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: hsl(var(--loss) / 0.2); }
+  }
+
+  .flash-profit {
+    animation: flash-green 0.5s ease-out;
+  }
+
+  .flash-loss {
+    animation: flash-red 0.5s ease-out;
+  }
+
+  /* Connection pulse animation */
+  @keyframes pulse-connecting {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .pulse-connecting {
+    animation: pulse-connecting 1.5s ease-in-out infinite;
+  }
+
+  /* Scrollbar styling for trading terminal */
+  .scrollbar-trading::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-trading::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-trading::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 3px;
+  }
+
+  .scrollbar-trading::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
   }
 }

@@ -81,6 +81,10 @@ export default {
           busy: "rgb(239 68 68)",
           offline: "rgb(156 163 175)",
         },
+        // Trading specific colors
+        profit: "hsl(var(--profit) / <alpha-value>)",
+        loss: "hsl(var(--loss) / <alpha-value>)",
+        neutral: "hsl(var(--neutral) / <alpha-value>)",
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
@@ -96,10 +100,15 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        "slide-in": {
+          from: { opacity: "0", transform: "translateY(10px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "slide-in": "slide-in 0.3s ease-out",
       },
     },
   },
