@@ -148,7 +148,7 @@ export function AIChatbot() {
 
   const sendMessageMutation = useMutation({
     mutationFn: async (content: string) => {
-      return apiRequest("POST", "/api/chat", {
+      const response = await apiRequest("POST", "/api/chat", {
         content,
         context: {
           symbol: selectedMarket?.symbol,
@@ -159,12 +159,13 @@ export function AIChatbot() {
           currentAlgorithm: activeAlgorithm,
         },
       });
+      return response.json();
     },
-    onSuccess: (response: any) => {
+    onSuccess: (data: { message: string; algorithm?: any }) => {
       addChatMessage({
         role: "assistant",
-        content: response.message,
-        algorithmJson: response.algorithm,
+        content: data.message,
+        algorithmJson: data.algorithm,
       });
     },
     onError: (error: Error) => {

@@ -17,7 +17,7 @@ export function MarketSelector() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const { data, isLoading } = useQuery<MarketsResponse>({
-    queryKey: ["/api/markets", selectedExchange],
+    queryKey: [`/api/markets?exchange=${selectedExchange}`],
     enabled: !!selectedExchange,
   });
 

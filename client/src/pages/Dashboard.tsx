@@ -34,14 +34,14 @@ export default function Dashboard() {
 
   // Fetch positions
   const { data: positionsData } = useQuery<{ positions: Position[] }>({
-    queryKey: ["/api/positions", selectedExchange],
+    queryKey: [`/api/positions?exchange=${selectedExchange}`],
     enabled: !!selectedExchange,
     refetchInterval: 5000,
   });
 
   // Fetch orders
   const { data: ordersData } = useQuery<{ orders: Order[] }>({
-    queryKey: ["/api/orders", selectedExchange],
+    queryKey: [`/api/orders?exchange=${selectedExchange}`],
     enabled: !!selectedExchange,
     refetchInterval: 5000,
   });
