@@ -1,4 +1,4 @@
-import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange } from "@shared/schema";
+import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange, ExecutionMode } from "@shared/schema";
 import { storage } from "./storage";
 import { exchangeService } from "./exchangeService";
 import { randomUUID } from "crypto";
@@ -7,6 +7,7 @@ interface TradingBotConfig {
   exchange: Exchange;
   symbol: string;
   algorithm: TradingAlgorithm;
+  executionMode: ExecutionMode;
   checkIntervalMs?: number;
 }
 
@@ -15,6 +16,9 @@ interface TradingBotState {
   isPaused: boolean;
   lastCheck: number;
   decisions: string[];
+  executionMode: ExecutionMode;
+  totalTrades: number;
+  successfulTrades: number;
 }
 
 class TradingBot {
@@ -24,6 +28,9 @@ class TradingBot {
     isPaused: false,
     lastCheck: 0,
     decisions: [],
+    executionMode: "paper",
+    totalTrades: 0,
+    successfulTrades: 0,
   };
   private checkInterval: NodeJS.Timeout | null = null;
 
@@ -38,18 +45,39 @@ class TradingBot {
       isPaused: false,
       lastCheck: Date.now(),
       decisions: [],
+      executionMode: config.executionMode,
+      totalTrades: 0,
+      successfulTrades: 0,
     };
+
+    // Get exchange-specific configuration
+    const exchangeInfo = exchangeService.getExchangeInfo(config.exchange);
+    const modeLabel = config.executionMode === "paper" ? "PAPER TRADING" : "REAL TRADING";
 
     await storage.addTradeLog({
       type: "algorithm",
-      message: `Trading bot started with algorithm: ${config.algorithm.name}`,
-      data: { algorithmId: config.algorithm.id, symbol: config.symbol },
+      message: `[${modeLabel}] Trading bot started on ${exchangeInfo.name} with algorithm: ${config.algorithm.name}`,
+      data: { 
+        algorithmId: config.algorithm.id, 
+        symbol: config.symbol,
+        exchange: config.exchange,
+        executionMode: config.executionMode,
+        maxLeverage: exchangeInfo.maxLeverage,
+        makerFee: exchangeInfo.makerFee,
+        takerFee: exchangeInfo.takerFee,
+      },
     });
 
-    // Start the trading loop
+    // Start the trading loop with exchange-specific interval
+    // BYDFI has faster API response times
+    const defaultInterval = config.exchange === "bydfi" ? 3000 : 5000;
+    const scalpingInterval = config.exchange === "bydfi" ? 1500 : 2000;
+    const interval = config.checkIntervalMs || 
+      (config.algorithm.mode === "ai-scalping" ? scalpingInterval : defaultInterval);
+
     this.checkInterval = setInterval(
       () => this.executeTradeCheck(),
-      config.checkIntervalMs || 5000
+      interval
     );
   }
 
@@ -59,9 +87,11 @@ class TradingBot {
     }
 
     this.state.isPaused = true;
+    const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+    
     await storage.addTradeLog({
       type: "algorithm",
-      message: "Trading bot paused",
+      message: `[${modeLabel}] Trading bot paused`,
     });
   }
 
@@ -71,9 +101,11 @@ class TradingBot {
     }
 
     this.state.isPaused = false;
+    const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+    
     await storage.addTradeLog({
       type: "algorithm",
-      message: "Trading bot resumed",
+      message: `[${modeLabel}] Trading bot resumed`,
     });
   }
 
@@ -83,13 +115,20 @@ class TradingBot {
       this.checkInterval = null;
     }
 
-    this.state.isRunning = false;
-    this.state.isPaused = false;
-
+    const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+    const stats = `Total trades: ${this.state.totalTrades}, Successful: ${this.state.successfulTrades}`;
+    
     await storage.addTradeLog({
       type: "algorithm",
-      message: "Trading bot stopped",
+      message: `[${modeLabel}] Trading bot stopped. ${stats}`,
+      data: {
+        totalTrades: this.state.totalTrades,
+        successfulTrades: this.state.successfulTrades,
+      },
     });
+
+    this.state.isRunning = false;
+    this.state.isPaused = false;
   }
 
   async closeAllPositions(): Promise<void> {
@@ -100,13 +139,28 @@ class TradingBot {
       throw new Error("No credentials available");
     }
 
-    await exchangeService.closeAllPositions(this.config.exchange, credentials);
-    await storage.setPositions(this.config.exchange, []);
-
-    await storage.addTradeLog({
-      type: "position",
-      message: "All positions closed",
-    });
+    const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+    
+    if (this.state.executionMode === "paper") {
+      // Paper trading - simulate closing positions
+      await exchangeService.closeAllPositions(this.config.exchange, credentials);
+      await storage.setPositions(this.config.exchange, []);
+      
+      await storage.addTradeLog({
+        type: "position",
+        message: `[${modeLabel}] All positions closed (simulated)`,
+      });
+    } else {
+      // Real trading - would execute real close orders
+      // For now, still uses simulation until real API is connected
+      await exchangeService.closeAllPositions(this.config.exchange, credentials);
+      await storage.setPositions(this.config.exchange, []);
+      
+      await storage.addTradeLog({
+        type: "position",
+        message: `[${modeLabel}] All positions closed`,
+      });
+    }
 
     await this.stop();
   }
@@ -115,7 +169,10 @@ class TradingBot {
     if (!this.config || this.state.isPaused) return;
 
     try {
-      const { exchange, symbol, algorithm } = this.config;
+      const { exchange, symbol, algorithm, executionMode } = this.config;
+      
+      // Get exchange-specific configuration
+      const exchangeInfo = exchangeService.getExchangeInfo(exchange);
       
       // Get current market data
       const ticker = await exchangeService.getTicker(exchange, symbol);
@@ -130,11 +187,17 @@ class TradingBot {
       // Update ticker in storage
       await storage.setTicker(exchange, symbol, ticker);
 
-      // Evaluate trading rules
-      const decision = await this.evaluateRules(algorithm.rules, ticker, klines, positions);
+      // Evaluate trading rules with exchange-specific parameters
+      const decision = await this.evaluateRules(
+        algorithm.rules, 
+        ticker, 
+        klines, 
+        positions,
+        exchangeInfo
+      );
 
       if (decision.action !== "hold") {
-        await this.executeDecision(decision, ticker);
+        await this.executeDecision(decision, ticker, exchangeInfo);
       }
 
       this.state.lastCheck = Date.now();
@@ -151,7 +214,8 @@ class TradingBot {
     rules: TradingRule[],
     ticker: Ticker,
     klines: Kline[],
-    positions: Position[]
+    positions: Position[],
+    exchangeInfo: ReturnType<typeof exchangeService.getExchangeInfo>
   ): Promise<{ action: string; rule?: TradingRule; reason: string }> {
     // Sort rules by priority
     const sortedRules = [...rules].sort((a, b) => a.priority - b.priority);
@@ -208,31 +272,42 @@ class TradingBot {
 
   private async executeDecision(
     decision: { action: string; rule?: TradingRule; reason: string },
-    ticker: Ticker
+    ticker: Ticker,
+    exchangeInfo: ReturnType<typeof exchangeService.getExchangeInfo>
   ): Promise<void> {
     if (!this.config) return;
 
-    const { exchange, symbol, algorithm } = this.config;
+    const { exchange, symbol, algorithm, executionMode } = this.config;
     const credentials = await storage.getCredentials(exchange);
     if (!credentials) return;
 
     const { riskManagement } = algorithm;
+    const modeLabel = executionMode === "paper" ? "PAPER" : "REAL";
 
     await storage.addTradeLog({
       type: "signal",
-      message: decision.reason,
-      data: { action: decision.action },
+      message: `[${modeLabel}] ${decision.reason}`,
+      data: { action: decision.action, exchange },
     });
 
     try {
+      this.state.totalTrades++;
+
       if (decision.action === "buy" || decision.action === "sell") {
         // Calculate position size based on risk management
+        // Use exchange-specific max leverage if algorithm allows
+        const effectiveLeverage = Math.min(
+          riskManagement.maxLeverage,
+          exchangeInfo.maxLeverage
+        );
+        
         const positionSize = Math.min(
           riskManagement.maxPositionSize,
           1000 // Default max
         );
         const quantity = positionSize / ticker.lastPrice;
 
+        // Execute order (simulated in paper mode, would be real in real mode)
         const order = await exchangeService.placeOrder(exchange, credentials, {
           symbol,
           type: decision.rule?.priceType || "market",
@@ -245,6 +320,8 @@ class TradingBot {
 
         // If order filled, create position
         if (order.status === "filled") {
+          this.state.successfulTrades++;
+          
           const position: Position = {
             id: randomUUID(),
             symbol,
@@ -252,24 +329,31 @@ class TradingBot {
             entryPrice: order.price,
             markPrice: ticker.lastPrice,
             quantity: order.filledQuantity,
-            leverage: riskManagement.maxLeverage,
+            leverage: effectiveLeverage,
             marginType: "isolated",
             unrealizedPnl: 0,
             unrealizedPnlPercent: 0,
             liquidationPrice: this.calculateLiquidationPrice(
               order.price,
               decision.action === "buy" ? "long" : "short",
-              riskManagement.maxLeverage
+              effectiveLeverage
             ),
             timestamp: Date.now(),
           };
 
           await storage.updatePosition(exchange, position);
 
+          // Calculate estimated fee
+          const fee = order.price * order.filledQuantity * exchangeInfo.takerFee;
+
           await storage.addTradeLog({
             type: "position",
-            message: `Opened ${position.side} position: ${position.quantity} ${symbol} @ ${position.entryPrice}`,
-            data: { positionId: position.id },
+            message: `[${modeLabel}] Opened ${position.side} position: ${position.quantity.toFixed(6)} ${symbol} @ ${position.entryPrice.toFixed(2)} (fee: ~$${fee.toFixed(4)})`,
+            data: { 
+              positionId: position.id,
+              exchange,
+              leverage: effectiveLeverage,
+            },
           });
         }
       } else if (decision.action === "close") {
@@ -280,17 +364,23 @@ class TradingBot {
           await exchangeService.closePosition(exchange, credentials, position.id);
           await storage.deletePosition(exchange, position.id);
 
+          this.state.successfulTrades++;
+
           await storage.addTradeLog({
             type: "position",
-            message: `Closed position: ${position.side} ${position.quantity} ${symbol}`,
-            data: { positionId: position.id, pnl: position.unrealizedPnl },
+            message: `[${modeLabel}] Closed position: ${position.side} ${position.quantity.toFixed(6)} ${symbol} (PnL: ${position.unrealizedPnl >= 0 ? '+' : ''}$${position.unrealizedPnl.toFixed(2)})`,
+            data: { 
+              positionId: position.id, 
+              pnl: position.unrealizedPnl,
+              exchange,
+            },
           });
         }
       }
     } catch (error) {
       await storage.addTradeLog({
         type: "error",
-        message: `Failed to execute ${decision.action}: ${(error as Error).message}`,
+        message: `[${modeLabel}] Failed to execute ${decision.action}: ${(error as Error).message}`,
       });
     }
   }
@@ -318,6 +408,10 @@ class TradingBot {
 
   isPaused(): boolean {
     return this.state.isPaused;
+  }
+
+  getExecutionMode(): ExecutionMode {
+    return this.state.executionMode;
   }
 }
 

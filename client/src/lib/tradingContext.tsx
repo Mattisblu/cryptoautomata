@@ -3,6 +3,7 @@ import type {
   Exchange,
   Market,
   TradingMode,
+  ExecutionMode,
   Ticker,
   Kline,
   Position,
@@ -26,6 +27,10 @@ interface TradingContextValue {
   // Trading mode
   tradingMode: TradingMode;
   setTradingMode: (mode: TradingMode) => void;
+  
+  // Execution mode (Paper vs Real)
+  executionMode: ExecutionMode;
+  setExecutionMode: (mode: ExecutionMode) => void;
   
   // Market data
   ticker: Ticker | null;
@@ -75,6 +80,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   // Trading mode
   const [tradingMode, setTradingMode] = useState<TradingMode>("ai-trading");
   
+  // Execution mode (Paper vs Real trading)
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("paper");
+  
   // Market data
   const [ticker, setTicker] = useState<Ticker | null>(null);
   const [klines, setKlines] = useState<Kline[]>([]);
@@ -91,6 +99,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [tradeCycleState, setTradeCycleState] = useState<TradeCycleState>({
     status: "idle",
     mode: "ai-trading",
+    executionMode: "paper",
     exchange: "coinstore",
     symbol: "",
   });
@@ -151,6 +160,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         setMarkets,
         tradingMode,
         setTradingMode,
+        executionMode,
+        setExecutionMode,
         ticker,
         setTicker,
         klines,

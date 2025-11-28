@@ -1,11 +1,17 @@
 # AI Crypto Trading Terminal
 
 ## Overview
-A professional AI-powered cryptocurrency futures trading application with automated trading algorithms, real-time market data, and intelligent trade execution for Coinstore exchange.
+A professional AI-powered cryptocurrency futures trading application with automated trading algorithms, real-time market data, and intelligent trade execution for Coinstore and BYDFI exchanges.
 
 ## Current State
-- **Phase**: MVP Implementation Complete
+- **Phase**: Phase 2 - Multi-Exchange & Execution Modes
 - **Last Updated**: November 2024
+
+## Recent Changes
+- Added BYDFI exchange support with exchange-specific configurations
+- Implemented Paper/Real trading toggle for safe testing vs live trading
+- Enhanced trading bot with execution mode tracking and trade statistics
+- Added exchange-specific intervals, fees, and leverage limits
 
 ## Architecture
 
@@ -44,11 +50,37 @@ server/
 ├── routes.ts          # API endpoints
 ├── storage.ts         # Data persistence
 ├── openai.ts          # AI integration
-├── exchangeService.ts # Exchange API simulation
-└── tradingBot.ts      # Automated trading logic
+├── exchangeService.ts # Exchange API simulation (Coinstore + BYDFI)
+└── tradingBot.ts      # Automated trading logic with execution modes
 shared/
 └── schema.ts          # Type definitions
 ```
+
+## Supported Exchanges
+
+### Coinstore
+- 8 trading pairs: BTC, ETH, SOL, BNB, XRP, ADA, DOGE, AVAX
+- Max leverage: 100x
+- Maker fee: 0.02%, Taker fee: 0.04%
+
+### BYDFI
+- 12 trading pairs: BTC, ETH, SOL, BNB, XRP, ADA, DOGE, LINK, MATIC, ARB, OP, APT
+- Max leverage: 125x
+- Maker fee: 0.01%, Taker fee: 0.03%
+- Faster API response times
+
+## Execution Modes
+
+### Paper Trading (Default)
+- Simulated order execution without real funds
+- Safe for testing strategies
+- All trades are logged as [PAPER]
+
+### Real Trading
+- Would execute orders on exchange with real funds
+- Warning shown when switching to this mode
+- All trades are logged as [REAL]
+- Currently uses simulated data until real API connected
 
 ## API Endpoints
 
@@ -57,6 +89,7 @@ shared/
 - `POST /api/auth/disconnect` - Disconnect and clear credentials
 
 ### Market Data
+- `GET /api/exchange-info?exchange=coinstore` - Get exchange configuration
 - `GET /api/markets?exchange=coinstore` - Get available markets
 - `GET /api/ticker?exchange=coinstore&symbol=BTCUSDT` - Get ticker data
 - `GET /api/klines?exchange=coinstore&symbol=BTCUSDT&timeframe=15m` - Get candlestick data
@@ -77,7 +110,7 @@ shared/
 - `DELETE /api/algorithms/:id` - Delete algorithm
 
 ### Trade Cycle
-- `POST /api/trading/start` - Start trading cycle
+- `POST /api/trading/start` - Start trading cycle (includes executionMode: "paper" | "real")
 - `POST /api/trading/pause` - Pause trading
 - `POST /api/trading/resume` - Resume trading
 - `POST /api/trading/stop` - Stop trading
@@ -97,23 +130,25 @@ shared/
 
 ## Trade Cycle Flow
 
-1. User selects exchange and market
+1. User selects exchange (Coinstore or BYDFI) and market
 2. User enters API credentials
-3. AI chatbot analyzes market data
-4. AI generates trading algorithm (JSON)
-5. User loads algorithm
-6. User starts trading cycle
-7. Trading bot executes trades based on algorithm rules
-8. Positions and orders displayed in real-time
-9. AI continues analyzing and can update algorithm
-10. User stops cycle or closes all positions
+3. User selects Paper or Real trading mode
+4. AI chatbot analyzes market data
+5. AI generates trading algorithm (JSON)
+6. User loads algorithm
+7. User starts trading cycle
+8. Trading bot executes trades based on algorithm rules
+9. Positions and orders displayed in real-time with [PAPER] or [REAL] labels
+10. AI continues analyzing and can update algorithm
+11. User stops cycle or closes all positions
 
 ## Risk Management
 - All positions use isolated margin (never cross)
 - Configurable stop-loss and take-profit
-- Maximum leverage limits
+- Maximum leverage limits (exchange-specific)
 - Maximum position size limits
 - Daily loss limits
+- Paper trading mode for risk-free testing
 
 ## Development
 
@@ -130,3 +165,4 @@ npm run dev
 - Dark mode default (professional trading interface)
 - Monospace fonts for numerical data (JetBrains Mono)
 - Green for profit/long, Red for loss/short
+- Paper trading mode as default for safety

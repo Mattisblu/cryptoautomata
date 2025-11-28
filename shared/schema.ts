@@ -152,9 +152,14 @@ export interface RiskManagement {
 export const tradeCycleStatuses = ["idle", "running", "paused", "stopping"] as const;
 export type TradeCycleStatus = typeof tradeCycleStatuses[number];
 
+// Execution modes: Paper (simulated) vs Real (live trading)
+export const executionModes = ["paper", "real"] as const;
+export type ExecutionMode = typeof executionModes[number];
+
 export interface TradeCycleState {
   status: TradeCycleStatus;
   mode: TradingMode;
+  executionMode: ExecutionMode;
   exchange: Exchange;
   symbol: string;
   startedAt?: number;

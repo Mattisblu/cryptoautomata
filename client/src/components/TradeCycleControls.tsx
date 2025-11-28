@@ -1,8 +1,15 @@
 import { useState } from "react";
-import { Play, Pause, Square, AlertTriangle, Loader2, Clock } from "lucide-react";
+import { Play, Pause, Square, AlertTriangle, Loader2, Clock, FlaskConical, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +49,8 @@ export function TradeCycleControls() {
     isAuthenticated, 
     selectedMarket,
     tradingMode,
+    executionMode,
+    setExecutionMode,
     positions,
     activeAlgorithm,
   } = useTradingContext();
@@ -52,11 +61,14 @@ export function TradeCycleControls() {
   const isPaused = tradeCycleState.status === "paused";
   const isStopping = tradeCycleState.status === "stopping";
   const hasPositions = positions.length > 0;
+  const isPaperTrading = executionMode === "paper";
+  const canSwitchMode = !isRunning && !isPaused;
 
   const startTradingMutation = useMutation({
     mutationFn: async () => {
       return apiRequest("POST", "/api/trading/start", {
         mode: tradingMode,
+        executionMode,
         symbol: selectedMarket?.symbol,
         algorithmId: activeAlgorithm?.id,
       });
@@ -66,13 +78,16 @@ export function TradeCycleControls() {
         ...tradeCycleState,
         status: "running",
         mode: tradingMode,
+        executionMode,
         symbol: selectedMarket?.symbol || "",
         startedAt: Date.now(),
         algorithmId: activeAlgorithm?.id,
       });
+      const modeLabel = tradingMode === "ai-trading" ? "AI Trading" : tradingMode === "ai-scalping" ? "AI Scalping" : "Manual";
+      const execLabel = isPaperTrading ? "Paper Trading" : "Real Trading";
       toast({
         title: "Trading Started",
-        description: `${tradingMode === "ai-trading" ? "AI Trading" : tradingMode === "ai-scalping" ? "AI Scalping" : "Manual"} mode activated.`,
+        description: `${modeLabel} mode activated (${execLabel}).`,
       });
     },
     onError: (error: Error) => {
@@ -124,6 +139,7 @@ export function TradeCycleControls() {
       setTradeCycleState({
         status: "idle",
         mode: tradingMode,
+        executionMode,
         exchange: tradeCycleState.exchange,
         symbol: "",
       });
@@ -142,6 +158,7 @@ export function TradeCycleControls() {
       setTradeCycleState({
         status: "idle",
         mode: tradingMode,
+        executionMode,
         exchange: tradeCycleState.exchange,
         symbol: "",
       });
@@ -209,6 +226,103 @@ export function TradeCycleControls() {
                 {activeAlgorithm.name}
               </Badge>
             )}
+
+            {/* Paper/Real Trading Indicator when running */}
+            {(isRunning || isPaused) && (
+              <Badge 
+                variant={isPaperTrading ? "secondary" : "destructive"}
+                className="text-xs gap-1"
+                data-testid="badge-execution-mode"
+              >
+                {isPaperTrading ? (
+                  <>
+                    <FlaskConical className="h-3 w-3" />
+                    Paper
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-3 w-3" />
+                    Real
+                  </>
+                )}
+              </Badge>
+            )}
+          </div>
+
+          {/* Paper/Real Trading Toggle */}
+          <div className="flex items-center gap-4">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className={cn(
+                  "flex items-center gap-3 px-3 py-2 rounded-md border transition-colors",
+                  !canSwitchMode && "opacity-50",
+                  isPaperTrading 
+                    ? "border-muted bg-muted/30" 
+                    : "border-yellow-500/50 bg-yellow-500/10"
+                )}>
+                  <div className="flex items-center gap-2">
+                    <FlaskConical className={cn(
+                      "h-4 w-4",
+                      isPaperTrading ? "text-muted-foreground" : "text-muted-foreground/50"
+                    )} />
+                    <Label 
+                      htmlFor="execution-mode" 
+                      className={cn(
+                        "text-sm cursor-pointer",
+                        isPaperTrading ? "text-foreground" : "text-muted-foreground"
+                      )}
+                    >
+                      Paper
+                    </Label>
+                  </div>
+                  
+                  <Switch
+                    id="execution-mode"
+                    checked={!isPaperTrading}
+                    onCheckedChange={(checked) => {
+                      if (canSwitchMode) {
+                        setExecutionMode(checked ? "real" : "paper");
+                        toast({
+                          title: checked ? "Real Trading Mode" : "Paper Trading Mode",
+                          description: checked 
+                            ? "Warning: Orders will be executed on the exchange with real funds!" 
+                            : "Orders will be simulated without real funds.",
+                          variant: checked ? "destructive" : "default",
+                        });
+                      }
+                    }}
+                    disabled={!canSwitchMode}
+                    data-testid="switch-execution-mode"
+                  />
+                  
+                  <div className="flex items-center gap-2">
+                    <Label 
+                      htmlFor="execution-mode" 
+                      className={cn(
+                        "text-sm cursor-pointer",
+                        !isPaperTrading ? "text-yellow-500 font-medium" : "text-muted-foreground"
+                      )}
+                    >
+                      Real
+                    </Label>
+                    <Zap className={cn(
+                      "h-4 w-4",
+                      !isPaperTrading ? "text-yellow-500" : "text-muted-foreground/50"
+                    )} />
+                  </div>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[250px]">
+                {isPaperTrading ? (
+                  <p>Paper Trading: Orders are simulated without using real funds. Safe for testing strategies.</p>
+                ) : (
+                  <p className="text-yellow-500">Real Trading: Orders will be executed on the exchange with real funds. Use with caution!</p>
+                )}
+                {!canSwitchMode && (
+                  <p className="text-muted-foreground mt-1">Stop trading to switch modes.</p>
+                )}
+              </TooltipContent>
+            </Tooltip>
           </div>
 
           {/* Control Buttons */}

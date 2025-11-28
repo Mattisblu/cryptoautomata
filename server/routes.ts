@@ -33,12 +33,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             tickerStreams.get(streamKey)?.stop();
           }
 
-          // Start new ticker stream
-          const stream = createTickerStream(data.symbol, (ticker) => {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: "ticker", data: ticker }));
+          // Start new ticker stream with exchange-specific behavior
+          const stream = createTickerStream(
+            data.exchange as Exchange,
+            data.symbol,
+            (ticker) => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "ticker", data: ticker }));
+              }
             }
-          });
+          );
           tickerStreams.set(streamKey, stream);
 
           // Send initial klines
@@ -114,6 +118,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ============ MARKET DATA ROUTES ============
+
+  app.get("/api/exchange-info", async (req, res) => {
+    try {
+      const exchange = req.query.exchange as Exchange;
+      if (!exchange) {
+        return res.status(400).json({ success: false, error: "Exchange required" });
+      }
+
+      const info = exchangeService.getExchangeInfo(exchange);
+      res.json({ success: true, info });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
 
   app.get("/api/markets", async (req, res) => {
     try {
@@ -324,13 +342,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/trading/start", async (req, res) => {
     try {
-      const { mode, symbol, algorithmId, exchange } = req.body;
+      const { mode, executionMode, symbol, algorithmId, exchange } = req.body;
 
       if (!symbol) {
         return res.status(400).json({ success: false, error: "Symbol required" });
       }
 
       const exchangeName = (exchange || "coinstore") as Exchange;
+      const execMode = (executionMode || "paper") as "paper" | "real";
       const credentials = await storage.getCredentials(exchangeName);
       
       if (!credentials) {
@@ -356,6 +375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           exchange: exchangeName,
           symbol,
           algorithm,
+          executionMode: execMode,
           checkIntervalMs: mode === "ai-scalping" ? 2000 : 5000,
         });
       }
@@ -363,6 +383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const state: TradeCycleState = {
         status: "running",
         mode,
+        executionMode: execMode,
         exchange: exchangeName,
         symbol,
         startedAt: Date.now(),
@@ -436,6 +457,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const newState: TradeCycleState = {
         status: "idle",
         mode: currentState?.mode || "ai-trading",
+        executionMode: currentState?.executionMode || "paper",
         exchange: exchange as Exchange,
         symbol: "",
       };
@@ -459,6 +481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const newState: TradeCycleState = {
         status: "idle",
         mode: currentState?.mode || "ai-trading",
+        executionMode: currentState?.executionMode || "paper",
         exchange: exchange as Exchange,
         symbol: "",
       };
@@ -475,7 +498,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/trading/state", async (req, res) => {
     try {
       const state = await storage.getTradeCycleState();
-      res.json({ success: true, state: state || { status: "idle" } });
+      // Return complete default state if none exists
+      const defaultState: TradeCycleState = {
+        status: "idle",
+        mode: "ai-trading",
+        executionMode: "paper",
+        exchange: "coinstore",
+        symbol: "",
+      };
+      res.json({ success: true, state: state || defaultState });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
