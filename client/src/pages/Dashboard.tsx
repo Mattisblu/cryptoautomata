@@ -13,6 +13,7 @@ import { CredentialsForm } from "@/components/CredentialsForm";
 import { TradeCycleControls } from "@/components/TradeCycleControls";
 import { AIChatbot } from "@/components/AIChatbot";
 import { AlgorithmStatus } from "@/components/AlgorithmStatus";
+import { RiskParametersCard } from "@/components/RiskParametersCard";
 import { useTradingContext } from "@/lib/tradingContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useQuery } from "@tanstack/react-query";
@@ -119,12 +120,15 @@ export default function Dashboard() {
 
         {/* Right Column - Sidebar */}
         <div className="w-[380px] border-l bg-card/30 flex flex-col overflow-hidden">
-          <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading">
+          <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading max-h-[calc(100vh-400px)]">
             {/* Credentials */}
             <CredentialsForm />
 
             {/* Algorithm Status (AI modes only) */}
             {!isManualMode && <AlgorithmStatus />}
+
+            {/* Risk Parameters (AI modes only) */}
+            {!isManualMode && <RiskParametersCard />}
 
             {/* Manual Trading Panel (Manual mode only) */}
             {isManualMode && <ManualTradingPanel />}

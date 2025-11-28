@@ -5,8 +5,8 @@ import { storage } from "./storage";
 import { exchangeService, createTickerStream } from "./exchangeService";
 import { analyzeAndRespond } from "./openai";
 import { tradingBot } from "./tradingBot";
-import { apiCredentialsSchema, manualOrderSchema } from "@shared/schema";
-import type { Exchange, TradeCycleState } from "@shared/schema";
+import { apiCredentialsSchema, manualOrderSchema, riskParametersSchema } from "@shared/schema";
+import type { Exchange, TradeCycleState, StopOrder } from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -526,6 +526,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/logs", async (req, res) => {
     try {
       await storage.clearTradeLog();
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // ============ RISK PARAMETERS ROUTES ============
+
+  app.get("/api/risk-parameters", async (req, res) => {
+    try {
+      const params = await storage.getRiskParameters();
+      // Return default parameters if none set
+      const defaultParams = {
+        maxPositionSize: 1000,
+        maxLeverage: 10,
+        stopLossPercent: 2,
+        takeProfitPercent: 4,
+        maxDailyLoss: 1000,
+        trailingStop: false,
+        trailingStopPercent: undefined,
+        autoStopLoss: true,
+        autoTakeProfit: true,
+        breakEvenTrigger: undefined,
+      };
+      res.json({ success: true, params: params || defaultParams });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/risk-parameters", async (req, res) => {
+    try {
+      const validatedParams = riskParametersSchema.parse(req.body);
+      await storage.setRiskParameters(validatedParams);
+      res.json({ success: true, params: validatedParams });
+    } catch (error) {
+      res.status(400).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // ============ STOP ORDERS ROUTES ============
+
+  app.get("/api/stop-orders", async (req, res) => {
+    try {
+      const exchange = (req.query.exchange as Exchange) || "coinstore";
+      const positionId = req.query.positionId as string | undefined;
+
+      let stopOrders: StopOrder[];
+      if (positionId) {
+        stopOrders = await storage.getStopOrdersByPosition(exchange, positionId);
+      } else {
+        stopOrders = await storage.getStopOrders(exchange);
+      }
+
+      res.json({ success: true, stopOrders });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.delete("/api/stop-orders/:id", async (req, res) => {
+    try {
+      const exchange = (req.query.exchange as Exchange) || "coinstore";
+      await storage.deleteStopOrder(exchange, req.params.id);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });

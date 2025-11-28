@@ -7,12 +7,14 @@ import type {
   Kline,
   Position,
   Order,
+  StopOrder,
   TradingAlgorithm,
   ChatMessage,
   TradeCycleState,
   TradeLogEntry,
   ApiCredentials,
   InsertChatMessage,
+  RiskParameters,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -45,6 +47,18 @@ export interface IStorage {
   addOrder(exchange: Exchange, order: Order): Promise<void>;
   updateOrder(exchange: Exchange, order: Order): Promise<void>;
 
+  // Stop Orders (SL/TP/Trailing)
+  getStopOrders(exchange: Exchange): Promise<StopOrder[]>;
+  getStopOrdersByPosition(exchange: Exchange, positionId: string): Promise<StopOrder[]>;
+  addStopOrder(exchange: Exchange, stopOrder: StopOrder): Promise<void>;
+  updateStopOrder(exchange: Exchange, stopOrder: StopOrder): Promise<void>;
+  deleteStopOrder(exchange: Exchange, id: string): Promise<void>;
+  deleteStopOrdersByPosition(exchange: Exchange, positionId: string): Promise<void>;
+
+  // Risk Parameters
+  getRiskParameters(): Promise<RiskParameters | null>;
+  setRiskParameters(params: RiskParameters): Promise<void>;
+
   // Algorithms
   getAlgorithms(): Promise<TradingAlgorithm[]>;
   getAlgorithm(id: string): Promise<TradingAlgorithm | null>;
@@ -74,10 +88,12 @@ export class MemStorage implements IStorage {
   private klines: Map<string, Kline[]> = new Map();
   private positions: Map<Exchange, Position[]> = new Map();
   private orders: Map<Exchange, Order[]> = new Map();
+  private stopOrders: Map<Exchange, StopOrder[]> = new Map();
   private algorithms: Map<string, TradingAlgorithm> = new Map();
   private chatMessages: ChatMessage[] = [];
   private tradeCycleState: TradeCycleState | null = null;
   private tradeLogs: TradeLogEntry[] = [];
+  private riskParameters: RiskParameters | null = null;
 
   private getTickerKey(exchange: Exchange, symbol: string): string {
     return `${exchange}:${symbol}`;
@@ -190,6 +206,50 @@ export class MemStorage implements IStorage {
       orders[index] = order;
       this.orders.set(exchange, orders);
     }
+  }
+
+  // Stop Orders (SL/TP/Trailing)
+  async getStopOrders(exchange: Exchange): Promise<StopOrder[]> {
+    return this.stopOrders.get(exchange) || [];
+  }
+
+  async getStopOrdersByPosition(exchange: Exchange, positionId: string): Promise<StopOrder[]> {
+    const stopOrders = this.stopOrders.get(exchange) || [];
+    return stopOrders.filter(so => so.positionId === positionId);
+  }
+
+  async addStopOrder(exchange: Exchange, stopOrder: StopOrder): Promise<void> {
+    const stopOrders = this.stopOrders.get(exchange) || [];
+    stopOrders.push(stopOrder);
+    this.stopOrders.set(exchange, stopOrders);
+  }
+
+  async updateStopOrder(exchange: Exchange, stopOrder: StopOrder): Promise<void> {
+    const stopOrders = this.stopOrders.get(exchange) || [];
+    const index = stopOrders.findIndex(so => so.id === stopOrder.id);
+    if (index >= 0) {
+      stopOrders[index] = stopOrder;
+      this.stopOrders.set(exchange, stopOrders);
+    }
+  }
+
+  async deleteStopOrder(exchange: Exchange, id: string): Promise<void> {
+    const stopOrders = this.stopOrders.get(exchange) || [];
+    this.stopOrders.set(exchange, stopOrders.filter(so => so.id !== id));
+  }
+
+  async deleteStopOrdersByPosition(exchange: Exchange, positionId: string): Promise<void> {
+    const stopOrders = this.stopOrders.get(exchange) || [];
+    this.stopOrders.set(exchange, stopOrders.filter(so => so.positionId !== positionId));
+  }
+
+  // Risk Parameters
+  async getRiskParameters(): Promise<RiskParameters | null> {
+    return this.riskParameters;
+  }
+
+  async setRiskParameters(params: RiskParameters): Promise<void> {
+    this.riskParameters = params;
   }
 
   // Algorithms

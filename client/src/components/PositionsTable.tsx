@@ -1,4 +1,4 @@
-import { ArrowUp, ArrowDown, X, Loader2 } from "lucide-react";
+import { ArrowUp, ArrowDown, X, Loader2, Shield, Target, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -10,6 +10,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useTradingContext } from "@/lib/tradingContext";
 import { cn } from "@/lib/utils";
 import type { Position } from "@shared/schema";
@@ -30,6 +35,7 @@ function formatPrice(price: number): string {
 function PositionRow({ position }: { position: Position }) {
   const isProfitable = position.unrealizedPnl >= 0;
   const isLong = position.side === "long";
+  const hasRiskOrders = position.stopLossPrice || position.takeProfitPrice || position.trailingStopDistance;
 
   return (
     <TableRow 
@@ -90,6 +96,53 @@ function PositionRow({ position }: { position: Position }) {
       <TableCell className="text-right font-mono tabular-nums">
         {position.quantity.toFixed(4)}
       </TableCell>
+      <TableCell className="text-right">
+        {hasRiskOrders ? (
+          <div className="flex items-center justify-end gap-1.5">
+            {position.stopLossPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-0.5 text-xs text-loss">
+                    <Shield className="h-3 w-3" />
+                    <span className="font-mono">{formatPrice(position.stopLossPrice)}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>Stop Loss @ {formatPrice(position.stopLossPrice)}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {position.takeProfitPrice && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-0.5 text-xs text-profit">
+                    <Target className="h-3 w-3" />
+                    <span className="font-mono">{formatPrice(position.takeProfitPrice)}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>Take Profit @ {formatPrice(position.takeProfitPrice)}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {position.trailingStopDistance && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-0.5 text-xs text-amber-500">
+                    <TrendingUp className="h-3 w-3" />
+                    <span className="font-mono">{position.trailingStopDistance}%</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>Trailing Stop ({position.trailingStopDistance}% distance)</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">-</span>
+        )}
+      </TableCell>
       <TableCell className="text-right font-mono tabular-nums text-loss">
         {formatPrice(position.liquidationPrice)}
       </TableCell>
@@ -137,38 +190,43 @@ export function PositionsTable() {
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-            Loading positions...
-          </div>
-        ) : positions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-            <p className="text-sm">No open positions</p>
-            <p className="text-xs mt-1">Positions will appear here when orders are executed</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Symbol</TableHead>
+                <TableHead className="text-right">Entry Price</TableHead>
+                <TableHead className="text-right">Mark Price</TableHead>
+                <TableHead className="text-right">PnL</TableHead>
+                <TableHead className="text-right">Size</TableHead>
+                <TableHead className="text-right">SL / TP</TableHead>
+                <TableHead className="text-right">Liq. Price</TableHead>
+                <TableHead className="text-right w-12"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
                 <TableRow>
-                  <TableHead>Symbol</TableHead>
-                  <TableHead className="text-right">Entry Price</TableHead>
-                  <TableHead className="text-right">Mark Price</TableHead>
-                  <TableHead className="text-right">PnL</TableHead>
-                  <TableHead className="text-right">Size</TableHead>
-                  <TableHead className="text-right">Liq. Price</TableHead>
-                  <TableHead className="text-right w-12"></TableHead>
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 mr-2 animate-spin inline" />
+                    Loading positions...
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {positions.map((position) => (
+              ) : positions.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    <p className="text-sm">No open positions</p>
+                    <p className="text-xs mt-1">Positions will appear here when orders are executed</p>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                positions.map((position) => (
                   <PositionRow key={position.id} position={position} />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   );

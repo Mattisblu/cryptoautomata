@@ -12,6 +12,10 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - Implemented Paper/Real trading toggle for safe testing vs live trading
 - Enhanced trading bot with execution mode tracking and trade statistics
 - Added exchange-specific intervals, fees, and leverage limits
+- Implemented Advanced Risk Management with auto stop-loss, take-profit, and trailing stop orders
+- Added Risk Parameters configuration UI component
+- Stop orders are automatically created when positions are opened
+- Trailing stops dynamically update based on price movement
 
 ## Architecture
 

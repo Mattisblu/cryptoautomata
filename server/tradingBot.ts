@@ -1,4 +1,4 @@
-import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange, ExecutionMode } from "@shared/schema";
+import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange, ExecutionMode, StopOrder, RiskManagement } from "@shared/schema";
 import { storage } from "./storage";
 import { exchangeService } from "./exchangeService";
 import { randomUUID } from "crypto";
@@ -187,6 +187,9 @@ class TradingBot {
       // Update ticker in storage
       await storage.setTicker(exchange, symbol, ticker);
 
+      // Check and execute stop orders (SL/TP/Trailing)
+      await this.checkStopOrders(exchange, ticker, positions);
+
       // Evaluate trading rules with exchange-specific parameters
       const decision = await this.evaluateRules(
         algorithm.rules, 
@@ -206,6 +209,204 @@ class TradingBot {
       await storage.addTradeLog({
         type: "error",
         message: `Trade check failed: ${(error as Error).message}`,
+      });
+    }
+  }
+
+  private async checkStopOrders(
+    exchange: Exchange,
+    ticker: Ticker,
+    positions: Position[]
+  ): Promise<void> {
+    const stopOrders = await storage.getStopOrders(exchange);
+    const activeStopOrders = stopOrders.filter(so => so.status === "active");
+    const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+
+    for (const stopOrder of activeStopOrders) {
+      const position = positions.find(p => p.id === stopOrder.positionId);
+      if (!position) {
+        // Position closed, cancel stop order
+        await storage.deleteStopOrder(exchange, stopOrder.id);
+        continue;
+      }
+
+      const currentPrice = ticker.lastPrice;
+      let shouldTrigger = false;
+
+      if (stopOrder.type === "stop_loss") {
+        // Stop loss triggers when price moves against position
+        if (position.side === "long" && currentPrice <= stopOrder.triggerPrice) {
+          shouldTrigger = true;
+        } else if (position.side === "short" && currentPrice >= stopOrder.triggerPrice) {
+          shouldTrigger = true;
+        }
+      } else if (stopOrder.type === "take_profit") {
+        // Take profit triggers when price moves in favor
+        if (position.side === "long" && currentPrice >= stopOrder.triggerPrice) {
+          shouldTrigger = true;
+        } else if (position.side === "short" && currentPrice <= stopOrder.triggerPrice) {
+          shouldTrigger = true;
+        }
+      } else if (stopOrder.type === "trailing_stop" && stopOrder.trailingDistance) {
+        // Trailing stop - update highest/lowest price and check trigger
+        const updatedStopOrder = { ...stopOrder };
+        
+        if (position.side === "long") {
+          // Track highest price for long position
+          const highestPrice = Math.max(stopOrder.highestPrice || position.entryPrice, currentPrice);
+          updatedStopOrder.highestPrice = highestPrice;
+          
+          // Calculate trailing stop trigger price
+          const trailTrigger = highestPrice * (1 - stopOrder.trailingDistance / 100);
+          updatedStopOrder.triggerPrice = trailTrigger;
+          
+          if (currentPrice <= trailTrigger) {
+            shouldTrigger = true;
+          }
+        } else {
+          // Track lowest price for short position
+          const lowestPrice = Math.min(stopOrder.lowestPrice || position.entryPrice, currentPrice);
+          updatedStopOrder.lowestPrice = lowestPrice;
+          
+          // Calculate trailing stop trigger price
+          const trailTrigger = lowestPrice * (1 + stopOrder.trailingDistance / 100);
+          updatedStopOrder.triggerPrice = trailTrigger;
+          
+          if (currentPrice >= trailTrigger) {
+            shouldTrigger = true;
+          }
+        }
+
+        // Update trailing stop order with new tracking prices
+        if (!shouldTrigger) {
+          await storage.updateStopOrder(exchange, updatedStopOrder);
+        }
+      }
+
+      if (shouldTrigger) {
+        // Execute stop order - close position
+        const credentials = await storage.getCredentials(exchange);
+        if (credentials) {
+          await exchangeService.closePosition(exchange, credentials, position.id);
+          await storage.deletePosition(exchange, position.id);
+          await storage.deleteStopOrdersByPosition(exchange, position.id);
+
+          const orderType = stopOrder.type === "stop_loss" ? "STOP LOSS" : 
+                           stopOrder.type === "take_profit" ? "TAKE PROFIT" : "TRAILING STOP";
+          const pnlSign = position.unrealizedPnl >= 0 ? "+" : "";
+
+          await storage.addTradeLog({
+            type: "position",
+            message: `[${modeLabel}] ${orderType} triggered: Closed ${position.side} ${position.quantity.toFixed(6)} ${position.symbol} @ ${currentPrice.toFixed(2)} (PnL: ${pnlSign}$${position.unrealizedPnl.toFixed(2)})`,
+            data: {
+              positionId: position.id,
+              stopOrderId: stopOrder.id,
+              orderType: stopOrder.type,
+              triggerPrice: stopOrder.triggerPrice,
+              pnl: position.unrealizedPnl,
+              exchange,
+            },
+          });
+
+          this.state.successfulTrades++;
+        }
+      }
+    }
+  }
+
+  private async createStopOrders(
+    exchange: Exchange,
+    position: Position,
+    riskManagement: RiskManagement
+  ): Promise<void> {
+    const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+
+    // Create stop-loss order if enabled
+    if (riskManagement.autoStopLoss || riskManagement.stopLossPercent > 0) {
+      const slPrice = position.side === "long"
+        ? position.entryPrice * (1 - riskManagement.stopLossPercent / 100)
+        : position.entryPrice * (1 + riskManagement.stopLossPercent / 100);
+
+      const stopLossOrder: StopOrder = {
+        id: randomUUID(),
+        positionId: position.id,
+        type: "stop_loss",
+        triggerPrice: slPrice,
+        quantity: position.quantity,
+        status: "active",
+        createdAt: Date.now(),
+      };
+
+      await storage.addStopOrder(exchange, stopLossOrder);
+
+      // Update position with stop loss reference
+      position.stopLossPrice = slPrice;
+      position.stopOrderId = stopLossOrder.id;
+      await storage.updatePosition(exchange, position);
+
+      await storage.addTradeLog({
+        type: "order",
+        message: `[${modeLabel}] Stop-loss set: ${position.symbol} @ ${slPrice.toFixed(2)} (${riskManagement.stopLossPercent}%)`,
+        data: { stopOrderId: stopLossOrder.id, triggerPrice: slPrice },
+      });
+    }
+
+    // Create take-profit order if enabled
+    if (riskManagement.autoTakeProfit || riskManagement.takeProfitPercent > 0) {
+      const tpPrice = position.side === "long"
+        ? position.entryPrice * (1 + riskManagement.takeProfitPercent / 100)
+        : position.entryPrice * (1 - riskManagement.takeProfitPercent / 100);
+
+      const takeProfitOrder: StopOrder = {
+        id: randomUUID(),
+        positionId: position.id,
+        type: "take_profit",
+        triggerPrice: tpPrice,
+        quantity: position.quantity,
+        status: "active",
+        createdAt: Date.now(),
+      };
+
+      await storage.addStopOrder(exchange, takeProfitOrder);
+
+      // Update position with take profit reference
+      position.takeProfitPrice = tpPrice;
+      position.takeProfitOrderId = takeProfitOrder.id;
+      await storage.updatePosition(exchange, position);
+
+      await storage.addTradeLog({
+        type: "order",
+        message: `[${modeLabel}] Take-profit set: ${position.symbol} @ ${tpPrice.toFixed(2)} (${riskManagement.takeProfitPercent}%)`,
+        data: { stopOrderId: takeProfitOrder.id, triggerPrice: tpPrice },
+      });
+    }
+
+    // Create trailing stop if enabled
+    if (riskManagement.trailingStop && riskManagement.trailingStopPercent) {
+      const trailingOrder: StopOrder = {
+        id: randomUUID(),
+        positionId: position.id,
+        type: "trailing_stop",
+        triggerPrice: position.entryPrice, // Will be updated dynamically
+        quantity: position.quantity,
+        status: "active",
+        trailingDistance: riskManagement.trailingStopPercent,
+        highestPrice: position.side === "long" ? position.entryPrice : undefined,
+        lowestPrice: position.side === "short" ? position.entryPrice : undefined,
+        createdAt: Date.now(),
+      };
+
+      await storage.addStopOrder(exchange, trailingOrder);
+
+      // Update position with trailing stop reference
+      position.trailingStopDistance = riskManagement.trailingStopPercent;
+      position.trailingStopOrderId = trailingOrder.id;
+      await storage.updatePosition(exchange, position);
+
+      await storage.addTradeLog({
+        type: "order",
+        message: `[${modeLabel}] Trailing stop set: ${position.symbol} with ${riskManagement.trailingStopPercent}% distance`,
+        data: { stopOrderId: trailingOrder.id, trailingDistance: riskManagement.trailingStopPercent },
       });
     }
   }
@@ -355,6 +556,9 @@ class TradingBot {
               leverage: effectiveLeverage,
             },
           });
+
+          // Create stop-loss, take-profit, and trailing stop orders
+          await this.createStopOrders(exchange, position, riskManagement);
         }
       } else if (decision.action === "close") {
         const positions = await storage.getPositions(exchange);
@@ -363,6 +567,8 @@ class TradingBot {
         for (const position of symbolPositions) {
           await exchangeService.closePosition(exchange, credentials, position.id);
           await storage.deletePosition(exchange, position.id);
+          // Clean up any associated stop orders
+          await storage.deleteStopOrdersByPosition(exchange, position.id);
 
           this.state.successfulTrades++;
 

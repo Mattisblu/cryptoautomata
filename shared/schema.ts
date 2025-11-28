@@ -63,7 +63,22 @@ export const apiCredentialsSchema = z.object({
 
 export type ApiCredentials = z.infer<typeof apiCredentialsSchema>;
 
-// Position schema
+// Stop-loss and take-profit order types
+export interface StopOrder {
+  id: string;
+  positionId: string;
+  type: "stop_loss" | "take_profit" | "trailing_stop";
+  triggerPrice: number;
+  quantity: number;
+  status: "active" | "triggered" | "cancelled";
+  trailingDistance?: number;  // For trailing stops (in %)
+  highestPrice?: number;      // Track highest price for trailing stop (long)
+  lowestPrice?: number;       // Track lowest price for trailing stop (short)
+  createdAt: number;
+  triggeredAt?: number;
+}
+
+// Position schema with stop-loss and take-profit tracking
 export interface Position {
   id: string;
   symbol: string;
@@ -77,6 +92,13 @@ export interface Position {
   unrealizedPnlPercent: number;
   liquidationPrice: number;
   timestamp: number;
+  // Risk management fields
+  stopLossPrice?: number;
+  takeProfitPrice?: number;
+  trailingStopDistance?: number;  // Trailing stop distance in %
+  stopOrderId?: string;
+  takeProfitOrderId?: string;
+  trailingStopOrderId?: string;
 }
 
 // Order schema
@@ -146,7 +168,26 @@ export interface RiskManagement {
   maxDailyLoss: number;
   trailingStop: boolean;
   trailingStopPercent?: number;
+  autoStopLoss: boolean;       // Auto-create SL orders on position open
+  autoTakeProfit: boolean;     // Auto-create TP orders on position open
+  breakEvenTrigger?: number;   // Move SL to break-even after X% profit
 }
+
+// Risk parameters configuration schema for UI
+export const riskParametersSchema = z.object({
+  maxPositionSize: z.number().min(10).max(100000).default(1000),
+  maxLeverage: z.number().min(1).max(125).default(10),
+  stopLossPercent: z.number().min(0.1).max(50).default(2),
+  takeProfitPercent: z.number().min(0.1).max(100).default(4),
+  maxDailyLoss: z.number().min(10).max(100000).default(1000),
+  trailingStop: z.boolean().default(false),
+  trailingStopPercent: z.number().min(0.1).max(20).optional(),
+  autoStopLoss: z.boolean().default(true),
+  autoTakeProfit: z.boolean().default(true),
+  breakEvenTrigger: z.number().min(0.5).max(50).optional(),
+});
+
+export type RiskParameters = z.infer<typeof riskParametersSchema>;
 
 // Trade cycle status
 export const tradeCycleStatuses = ["idle", "running", "paused", "stopping"] as const;
