@@ -10,7 +10,8 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Shield, TrendingUp, TrendingDown, Activity, Save, RefreshCw } from "lucide-react";
+import { useTradingContext } from "@/lib/tradingContext";
+import { Shield, TrendingUp, TrendingDown, Activity, Save, RefreshCw, AlertTriangle } from "lucide-react";
 import type { RiskParameters } from "@shared/schema";
 
 const defaultRiskParams: RiskParameters = {
@@ -34,6 +35,7 @@ interface InputState {
 
 export function RiskParametersCard() {
   const { toast } = useToast();
+  const { selectedMarket } = useTradingContext();
   const [params, setParams] = useState<RiskParameters>(defaultRiskParams);
   const [hasChanges, setHasChanges] = useState(false);
   const [inputValues, setInputValues] = useState<InputState>({
@@ -41,6 +43,9 @@ export function RiskParametersCard() {
     maxLeverage: "10",
     maxDailyLoss: "1000",
   });
+
+  const marketMaxLeverage = selectedMarket?.maxLeverage || 100;
+  const isLeverageExceedsLimit = params.maxLeverage > marketMaxLeverage;
 
   const { data, isLoading } = useQuery<{ success: boolean; params: RiskParameters }>({
     queryKey: ['/api/risk-parameters'],
@@ -108,7 +113,11 @@ export function RiskParametersCard() {
   };
 
   const handleSave = () => {
-    saveMutation.mutate(params);
+    const paramsToSave = {
+      ...params,
+      maxLeverage: Math.min(params.maxLeverage, marketMaxLeverage),
+    };
+    saveMutation.mutate(paramsToSave);
   };
 
   const handleReset = () => {
@@ -175,7 +184,12 @@ export function RiskParametersCard() {
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Max Leverage</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">Max Leverage</Label>
+                <span className="text-xs text-muted-foreground" data-testid="text-market-max-leverage">
+                  Market limit: {marketMaxLeverage}x
+                </span>
+              </div>
               <Input
                 type="text"
                 inputMode="numeric"
@@ -183,8 +197,14 @@ export function RiskParametersCard() {
                 onChange={(e) => handleInputChange('maxLeverage', e.target.value)}
                 onBlur={() => handleInputBlur('maxLeverage')}
                 data-testid="input-max-leverage"
-                className="font-mono"
+                className={`font-mono ${isLeverageExceedsLimit ? 'border-amber-500 focus-visible:ring-amber-500' : ''}`}
               />
+              {isLeverageExceedsLimit && (
+                <div className="flex items-center gap-1 text-xs text-amber-500">
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>Exceeds market limit - will use {marketMaxLeverage}x</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -94,6 +94,7 @@ export interface Market {
   quoteAsset: string;
   pricePrecision: number;
   quantityPrecision: number;
+  maxLeverage: number;
 }
 
 // Trading modes

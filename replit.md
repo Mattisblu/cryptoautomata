@@ -8,6 +8,10 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: November 2024
 
 ## Recent Changes
+- Added market-specific leverage limits (each trading pair has its own max leverage)
+- UI displays market's max leverage and warns if user setting exceeds it
+- Trading bot enforces leverage limits from algorithm, exchange, and market levels
+- Fixed risk parameter inputs (no more leading zeros, proper clearing)
 - Added PostgreSQL database for persistent trade history storage
 - Created Trade History Analytics Dashboard with performance metrics
 - Implemented cumulative PnL chart and win/loss distribution visualization
@@ -66,13 +70,16 @@ shared/
 ## Supported Exchanges
 
 ### Coinstore
-- 8 trading pairs: BTC, ETH, SOL, BNB, XRP, ADA, DOGE, AVAX
-- Max leverage: 100x
+- 8 trading pairs with market-specific leverage limits:
+  - BTCUSDT: 100x | ETHUSDT: 75x
+  - SOL/BNB/XRP: 50x | ADA/DOGE/AVAX: 25x
 - Maker fee: 0.02%, Taker fee: 0.04%
 
 ### BYDFI
-- 12 trading pairs: BTC, ETH, SOL, BNB, XRP, ADA, DOGE, LINK, MATIC, ARB, OP, APT
-- Max leverage: 125x
+- 12 trading pairs with market-specific leverage limits:
+  - BTCUSDT: 125x | ETHUSDT: 100x
+  - SOL/BNB/XRP: 75x | ADA/DOGE/LINK/MATIC: 50x
+  - ARB/OP/APT: 25x
 - Maker fee: 0.01%, Taker fee: 0.03%
 - Faster API response times
 
@@ -161,7 +168,7 @@ shared/
 ## Risk Management
 - All positions use isolated margin (never cross)
 - Configurable stop-loss and take-profit
-- Maximum leverage limits (exchange-specific)
+- Market-specific leverage limits (displayed in UI, enforced by trading bot)
 - Maximum position size limits
 - Daily loss limits
 - Paper trading mode for risk-free testing

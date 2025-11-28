@@ -523,10 +523,16 @@ class TradingBot {
 
       if (decision.action === "buy" || decision.action === "sell") {
         // Calculate position size based on risk management
-        // Use exchange-specific max leverage if algorithm allows
+        // Get market-specific max leverage
+        const markets = await exchangeService.getMarkets(exchange);
+        const market = markets.find(m => m.symbol === symbol);
+        const marketMaxLeverage = market?.maxLeverage || exchangeInfo.maxLeverage;
+        
+        // Use the minimum of algorithm, exchange-wide, and market-specific leverage limits
         const effectiveLeverage = Math.min(
           riskManagement.maxLeverage,
-          exchangeInfo.maxLeverage
+          exchangeInfo.maxLeverage,
+          marketMaxLeverage
         );
         
         const positionSize = Math.min(
