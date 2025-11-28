@@ -1,4 +1,87 @@
 import { z } from "zod";
+import { pgTable, text, integer, real, timestamp, boolean, serial, varchar } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { relations } from "drizzle-orm";
+
+// ============ DATABASE TABLES (Drizzle ORM) ============
+
+// Trade history table - persists all executed trades for analytics
+export const trades = pgTable("trades", {
+  id: serial("id").primaryKey(),
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  side: text("side").notNull(), // "buy" or "sell"
+  positionSide: text("position_side").notNull(), // "long" or "short"
+  entryPrice: real("entry_price").notNull(),
+  exitPrice: real("exit_price"),
+  quantity: real("quantity").notNull(),
+  leverage: integer("leverage").notNull().default(1),
+  pnl: real("pnl"),
+  pnlPercent: real("pnl_percent"),
+  fees: real("fees").default(0),
+  executionMode: text("execution_mode").notNull().default("paper"), // "paper" or "real"
+  algorithmId: text("algorithm_id"),
+  algorithmName: text("algorithm_name"),
+  status: text("status").notNull().default("open"), // "open", "closed", "liquidated"
+  openedAt: timestamp("opened_at").notNull().defaultNow(),
+  closedAt: timestamp("closed_at"),
+  stopLossPrice: real("stop_loss_price"),
+  takeProfitPrice: real("take_profit_price"),
+  closeReason: text("close_reason"), // "manual", "stop_loss", "take_profit", "trailing_stop", "liquidation", "algorithm"
+  notes: text("notes"),
+});
+
+// Daily trading summaries for quick analytics
+export const dailySummaries = pgTable("daily_summaries", {
+  id: serial("id").primaryKey(),
+  date: text("date").notNull().unique(), // YYYY-MM-DD format
+  exchange: text("exchange").notNull(),
+  totalTrades: integer("total_trades").notNull().default(0),
+  winningTrades: integer("winning_trades").notNull().default(0),
+  losingTrades: integer("losing_trades").notNull().default(0),
+  totalPnl: real("total_pnl").notNull().default(0),
+  totalFees: real("total_fees").notNull().default(0),
+  largestWin: real("largest_win").default(0),
+  largestLoss: real("largest_loss").default(0),
+  executionMode: text("execution_mode").notNull().default("paper"),
+});
+
+// Algorithm performance tracking
+export const algorithmPerformance = pgTable("algorithm_performance", {
+  id: serial("id").primaryKey(),
+  algorithmId: text("algorithm_id").notNull(),
+  algorithmName: text("algorithm_name").notNull(),
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  totalTrades: integer("total_trades").notNull().default(0),
+  winningTrades: integer("winning_trades").notNull().default(0),
+  totalPnl: real("total_pnl").notNull().default(0),
+  avgPnlPerTrade: real("avg_pnl_per_trade").default(0),
+  maxDrawdown: real("max_drawdown").default(0),
+  sharpeRatio: real("sharpe_ratio"),
+  winRate: real("win_rate").default(0),
+  lastUpdated: timestamp("last_updated").notNull().defaultNow(),
+});
+
+// Relations
+export const tradesRelations = relations(trades, ({ }) => ({}));
+export const dailySummariesRelations = relations(dailySummaries, ({ }) => ({}));
+export const algorithmPerformanceRelations = relations(algorithmPerformance, ({ }) => ({}));
+
+// Insert schemas
+export const insertTradeSchema = createInsertSchema(trades).omit({ id: true });
+export type InsertTrade = z.infer<typeof insertTradeSchema>;
+export type Trade = typeof trades.$inferSelect;
+
+export const insertDailySummarySchema = createInsertSchema(dailySummaries).omit({ id: true });
+export type InsertDailySummary = z.infer<typeof insertDailySummarySchema>;
+export type DailySummary = typeof dailySummaries.$inferSelect;
+
+export const insertAlgorithmPerformanceSchema = createInsertSchema(algorithmPerformance).omit({ id: true });
+export type InsertAlgorithmPerformance = z.infer<typeof insertAlgorithmPerformanceSchema>;
+export type AlgorithmPerformance = typeof algorithmPerformance.$inferSelect;
+
+// ============ EXISTING TYPES (Non-database) ============
 
 // Exchange types
 export const exchanges = ["coinstore", "bydfi"] as const;

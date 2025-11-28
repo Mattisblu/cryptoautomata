@@ -17,7 +17,9 @@ import { RiskParametersCard } from "@/components/RiskParametersCard";
 import { useTradingContext } from "@/lib/tradingContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useQuery } from "@tanstack/react-query";
-import { Bot } from "lucide-react";
+import { Bot, BarChart3 } from "lucide-react";
+import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
 import type { Position, Order } from "@shared/schema";
 
 export default function Dashboard() {
@@ -86,6 +88,12 @@ export default function Dashboard() {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
+          <Link href="/analytics">
+            <Button variant="ghost" size="sm" className="hidden sm:flex gap-1.5" data-testid="link-analytics">
+              <BarChart3 className="w-4 h-4" />
+              Analytics
+            </Button>
+          </Link>
           <ConnectionStatus />
           <ThemeToggle />
         </div>

@@ -15,7 +15,14 @@ import type {
   ApiCredentials,
   InsertChatMessage,
   RiskParameters,
+  Trade,
+  InsertTrade,
+  DailySummary,
+  AlgorithmPerformance,
 } from "@shared/schema";
+import { trades, dailySummaries, algorithmPerformance } from "@shared/schema";
+import { db } from "./db";
+import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 
 export interface IStorage {
   // Credentials
@@ -79,6 +86,33 @@ export interface IStorage {
   getTradeLog(): Promise<TradeLogEntry[]>;
   addTradeLog(entry: Omit<TradeLogEntry, "id" | "timestamp">): Promise<TradeLogEntry>;
   clearTradeLog(): Promise<void>;
+
+  // Trade History (Database)
+  createTrade(trade: InsertTrade): Promise<Trade>;
+  updateTrade(id: number, updates: Partial<Trade>): Promise<Trade | null>;
+  getTrades(options?: { 
+    exchange?: string; 
+    symbol?: string; 
+    limit?: number; 
+    status?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<Trade[]>;
+  getTrade(id: number): Promise<Trade | null>;
+  getTradeAnalytics(exchange?: string): Promise<{
+    totalTrades: number;
+    winningTrades: number;
+    losingTrades: number;
+    totalPnl: number;
+    winRate: number;
+    avgWin: number;
+    avgLoss: number;
+    profitFactor: number;
+    largestWin: number;
+    largestLoss: number;
+  }>;
+  getDailySummaries(days?: number): Promise<DailySummary[]>;
+  getAlgorithmPerformance(algorithmId?: string): Promise<AlgorithmPerformance[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -324,6 +358,135 @@ export class MemStorage implements IStorage {
 
   async clearTradeLog(): Promise<void> {
     this.tradeLogs = [];
+  }
+
+  // Trade History (Database) - Uses PostgreSQL for persistence
+  async createTrade(trade: InsertTrade): Promise<Trade> {
+    const [newTrade] = await db.insert(trades).values(trade).returning();
+    return newTrade;
+  }
+
+  async updateTrade(id: number, updates: Partial<Trade>): Promise<Trade | null> {
+    const [updated] = await db
+      .update(trades)
+      .set(updates)
+      .where(eq(trades.id, id))
+      .returning();
+    return updated || null;
+  }
+
+  async getTrades(options?: { 
+    exchange?: string; 
+    symbol?: string; 
+    limit?: number; 
+    status?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<Trade[]> {
+    const conditions = [];
+    
+    if (options?.exchange) {
+      conditions.push(eq(trades.exchange, options.exchange));
+    }
+    if (options?.symbol) {
+      conditions.push(eq(trades.symbol, options.symbol));
+    }
+    if (options?.status) {
+      conditions.push(eq(trades.status, options.status));
+    }
+    if (options?.startDate) {
+      conditions.push(gte(trades.openedAt, options.startDate));
+    }
+    if (options?.endDate) {
+      conditions.push(lte(trades.openedAt, options.endDate));
+    }
+
+    const query = db.select().from(trades);
+    
+    if (conditions.length > 0) {
+      const result = await query
+        .where(and(...conditions))
+        .orderBy(desc(trades.openedAt))
+        .limit(options?.limit || 100);
+      return result;
+    }
+    
+    return query.orderBy(desc(trades.openedAt)).limit(options?.limit || 100);
+  }
+
+  async getTrade(id: number): Promise<Trade | null> {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, id));
+    return trade || null;
+  }
+
+  async getTradeAnalytics(exchange?: string): Promise<{
+    totalTrades: number;
+    winningTrades: number;
+    losingTrades: number;
+    totalPnl: number;
+    winRate: number;
+    avgWin: number;
+    avgLoss: number;
+    profitFactor: number;
+    largestWin: number;
+    largestLoss: number;
+  }> {
+    const conditions = [eq(trades.status, "closed")];
+    if (exchange) {
+      conditions.push(eq(trades.exchange, exchange));
+    }
+
+    const allTrades = await db
+      .select()
+      .from(trades)
+      .where(and(...conditions));
+
+    const closedTrades = allTrades.filter(t => t.pnl !== null);
+    const winningTrades = closedTrades.filter(t => (t.pnl || 0) > 0);
+    const losingTrades = closedTrades.filter(t => (t.pnl || 0) < 0);
+
+    const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const totalWins = winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const totalLosses = Math.abs(losingTrades.reduce((sum, t) => sum + (t.pnl || 0), 0));
+
+    const largestWin = winningTrades.length > 0 
+      ? Math.max(...winningTrades.map(t => t.pnl || 0)) 
+      : 0;
+    const largestLoss = losingTrades.length > 0 
+      ? Math.min(...losingTrades.map(t => t.pnl || 0)) 
+      : 0;
+
+    return {
+      totalTrades: closedTrades.length,
+      winningTrades: winningTrades.length,
+      losingTrades: losingTrades.length,
+      totalPnl,
+      winRate: closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0,
+      avgWin: winningTrades.length > 0 ? totalWins / winningTrades.length : 0,
+      avgLoss: losingTrades.length > 0 ? totalLosses / losingTrades.length : 0,
+      profitFactor: totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0,
+      largestWin,
+      largestLoss,
+    };
+  }
+
+  async getDailySummaries(days?: number): Promise<DailySummary[]> {
+    const limit = days || 30;
+    return db
+      .select()
+      .from(dailySummaries)
+      .orderBy(desc(dailySummaries.date))
+      .limit(limit);
+  }
+
+  async getAlgorithmPerformance(algorithmId?: string): Promise<AlgorithmPerformance[]> {
+    if (algorithmId) {
+      return db
+        .select()
+        .from(algorithmPerformance)
+        .where(eq(algorithmPerformance.algorithmId, algorithmId));
+    }
+    return db.select().from(algorithmPerformance);
   }
 }
 

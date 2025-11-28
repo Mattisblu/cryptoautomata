@@ -5,9 +5,19 @@ import { storage } from "./storage";
 import { exchangeService, createTickerStream } from "./exchangeService";
 import { analyzeAndRespond } from "./openai";
 import { tradingBot } from "./tradingBot";
-import { apiCredentialsSchema, manualOrderSchema, riskParametersSchema } from "@shared/schema";
+import { apiCredentialsSchema, manualOrderSchema, riskParametersSchema, insertTradeSchema } from "@shared/schema";
 import type { Exchange, TradeCycleState, StopOrder } from "@shared/schema";
 import { z } from "zod";
+
+// Schema for trade update validation
+const updateTradeSchema = z.object({
+  exitPrice: z.number().optional(),
+  pnl: z.number().optional(),
+  pnlPercent: z.number().optional(),
+  status: z.enum(["open", "closed", "liquidated"]).optional(),
+  closedAt: z.string().datetime().optional(),
+  closeReason: z.string().optional(),
+});
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
@@ -591,6 +601,114 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const exchange = (req.query.exchange as Exchange) || "coinstore";
       await storage.deleteStopOrder(exchange, req.params.id);
       res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // ============ TRADE HISTORY & ANALYTICS ROUTES ============
+
+  // Get trade history with optional filters
+  app.get("/api/trades", async (req, res) => {
+    try {
+      const options = {
+        exchange: req.query.exchange as string | undefined,
+        symbol: req.query.symbol as string | undefined,
+        status: req.query.status as string | undefined,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
+        startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
+        endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined,
+      };
+
+      const trades = await storage.getTrades(options);
+      res.json({ success: true, trades });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get a single trade by ID
+  app.get("/api/trades/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const trade = await storage.getTrade(id);
+      
+      if (!trade) {
+        return res.status(404).json({ success: false, error: "Trade not found" });
+      }
+
+      res.json({ success: true, trade });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Create a new trade (usually called by trading bot)
+  app.post("/api/trades", async (req, res) => {
+    try {
+      const tradeData = insertTradeSchema.parse(req.body);
+      const trade = await storage.createTrade(tradeData);
+      res.json({ success: true, trade });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ success: false, error: error.errors[0].message });
+      }
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Update a trade (e.g., when closing)
+  app.patch("/api/trades/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ success: false, error: "Invalid trade ID" });
+      }
+      
+      const updates = updateTradeSchema.parse(req.body);
+      const trade = await storage.updateTrade(id, updates);
+      
+      if (!trade) {
+        return res.status(404).json({ success: false, error: "Trade not found" });
+      }
+
+      res.json({ success: true, trade });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ success: false, error: error.errors[0].message });
+      }
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get trade analytics/statistics
+  app.get("/api/analytics", async (req, res) => {
+    try {
+      const exchange = req.query.exchange as string | undefined;
+      const analytics = await storage.getTradeAnalytics(exchange);
+      res.json({ success: true, analytics });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get daily summaries for PnL chart
+  app.get("/api/analytics/daily", async (req, res) => {
+    try {
+      const days = req.query.days ? parseInt(req.query.days as string) : 30;
+      const summaries = await storage.getDailySummaries(days);
+      res.json({ success: true, summaries });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get algorithm performance metrics
+  app.get("/api/analytics/algorithms", async (req, res) => {
+    try {
+      const algorithmId = req.query.algorithmId as string | undefined;
+      const performance = await storage.getAlgorithmPerformance(algorithmId);
+      res.json({ success: true, performance });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }

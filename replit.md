@@ -4,18 +4,17 @@
 A professional AI-powered cryptocurrency futures trading application with automated trading algorithms, real-time market data, and intelligent trade execution for Coinstore and BYDFI exchanges.
 
 ## Current State
-- **Phase**: Phase 2 - Multi-Exchange & Execution Modes
+- **Phase**: Phase 3 - Analytics & Persistence
 - **Last Updated**: November 2024
 
 ## Recent Changes
-- Added BYDFI exchange support with exchange-specific configurations
-- Implemented Paper/Real trading toggle for safe testing vs live trading
-- Enhanced trading bot with execution mode tracking and trade statistics
-- Added exchange-specific intervals, fees, and leverage limits
-- Implemented Advanced Risk Management with auto stop-loss, take-profit, and trailing stop orders
-- Added Risk Parameters configuration UI component
-- Stop orders are automatically created when positions are opened
-- Trailing stops dynamically update based on price movement
+- Added PostgreSQL database for persistent trade history storage
+- Created Trade History Analytics Dashboard with performance metrics
+- Implemented cumulative PnL chart and win/loss distribution visualization
+- Trading bot now records trades to database when positions open/close
+- Added API endpoints for trade analytics and historical data
+- Database tables: trades, daily_summaries, algorithm_performance
+- Previous features: BYDFI support, Paper/Real toggle, Risk Management with SL/TP/Trailing stops
 
 ## Architecture
 
@@ -31,7 +30,8 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Framework**: Express.js
 - **Real-time**: WebSocket Server (ws)
 - **AI Integration**: OpenAI via Replit AI Integrations
-- **Storage**: In-memory (MemStorage class)
+- **Database**: PostgreSQL (Neon) with Drizzle ORM
+- **Storage**: In-memory for real-time data (MemStorage), PostgreSQL for trade history
 
 ### Key Files
 ```
@@ -42,6 +42,7 @@ client/
 │   │   ├── KlineChart.tsx
 │   │   ├── PositionsTable.tsx
 │   │   ├── OrdersTable.tsx
+│   │   ├── RiskParametersCard.tsx
 │   │   ├── TradeCycleControls.tsx
 │   │   └── ...
 │   ├── hooks/
@@ -49,15 +50,17 @@ client/
 │   ├── lib/
 │   │   └── tradingContext.tsx
 │   └── pages/
-│       └── Dashboard.tsx
+│       ├── Dashboard.tsx
+│       └── Analytics.tsx     # Trade history & performance dashboard
 server/
+├── db.ts              # Database connection (Drizzle + Neon)
 ├── routes.ts          # API endpoints
-├── storage.ts         # Data persistence
+├── storage.ts         # Data persistence (in-memory + database)
 ├── openai.ts          # AI integration
 ├── exchangeService.ts # Exchange API simulation (Coinstore + BYDFI)
-└── tradingBot.ts      # Automated trading logic with execution modes
+└── tradingBot.ts      # Automated trading logic with trade recording
 shared/
-└── schema.ts          # Type definitions
+└── schema.ts          # Type definitions + Drizzle table schemas
 ```
 
 ## Supported Exchanges
@@ -120,6 +123,15 @@ shared/
 - `POST /api/trading/stop` - Stop trading
 - `POST /api/trading/close-all` - Close all positions and stop
 - `GET /api/trading/state` - Get current trading state
+
+### Trade History & Analytics
+- `GET /api/trades` - Get trade history (filters: exchange, symbol, status, limit, startDate, endDate)
+- `GET /api/trades/:id` - Get specific trade details
+- `POST /api/trades` - Create a new trade record (used by trading bot)
+- `PATCH /api/trades/:id` - Update trade (e.g., when closing)
+- `GET /api/analytics` - Get overall trade statistics (filters: exchange)
+- `GET /api/analytics/daily?days=30` - Get daily PnL summaries
+- `GET /api/analytics/algorithms?algorithmId=xxx` - Get algorithm performance metrics
 
 ### WebSocket
 - `ws://host/ws` - Real-time data stream

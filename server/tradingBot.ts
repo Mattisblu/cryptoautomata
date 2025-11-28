@@ -1,7 +1,10 @@
-import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange, ExecutionMode, StopOrder, RiskManagement } from "@shared/schema";
+import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange, ExecutionMode, StopOrder, RiskManagement, InsertTrade } from "@shared/schema";
 import { storage } from "./storage";
 import { exchangeService } from "./exchangeService";
 import { randomUUID } from "crypto";
+
+// Map position IDs to trade IDs for updating when positions close
+const positionToTradeId: Map<string, number> = new Map();
 
 interface TradingBotConfig {
   exchange: Exchange;
@@ -140,25 +143,46 @@ class TradingBot {
     }
 
     const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+    const exchange = this.config.exchange;
+    
+    // Get current positions before closing
+    const positions = await storage.getPositions(exchange);
+
+    // Update trade records for each position using its most recent markPrice
+    for (const position of positions) {
+      // Try to get current price for this specific symbol
+      let exitPrice = position.markPrice;
+      try {
+        const ticker = await exchangeService.getTicker(exchange, position.symbol);
+        exitPrice = ticker.lastPrice || position.markPrice;
+      } catch {
+        // Use position's markPrice as fallback
+      }
+      
+      await this.updateTradeOnClose(position, exitPrice, "manual");
+      this.state.successfulTrades++;
+    }
     
     if (this.state.executionMode === "paper") {
       // Paper trading - simulate closing positions
-      await exchangeService.closeAllPositions(this.config.exchange, credentials);
-      await storage.setPositions(this.config.exchange, []);
+      await exchangeService.closeAllPositions(exchange, credentials);
+      await storage.setPositions(exchange, []);
       
       await storage.addTradeLog({
         type: "position",
-        message: `[${modeLabel}] All positions closed (simulated)`,
+        message: `[${modeLabel}] All ${positions.length} positions closed (simulated)`,
+        data: { positionsClosed: positions.length },
       });
     } else {
       // Real trading - would execute real close orders
       // For now, still uses simulation until real API is connected
-      await exchangeService.closeAllPositions(this.config.exchange, credentials);
-      await storage.setPositions(this.config.exchange, []);
+      await exchangeService.closeAllPositions(exchange, credentials);
+      await storage.setPositions(exchange, []);
       
       await storage.addTradeLog({
         type: "position",
-        message: `[${modeLabel}] All positions closed`,
+        message: `[${modeLabel}] All ${positions.length} positions closed`,
+        data: { positionsClosed: positions.length },
       });
     }
 
@@ -307,6 +331,9 @@ class TradingBot {
               exchange,
             },
           });
+
+          // Update trade record in database
+          await this.updateTradeOnClose(position, currentPrice, stopOrder.type);
 
           this.state.successfulTrades++;
         }
@@ -559,6 +586,31 @@ class TradingBot {
 
           // Create stop-loss, take-profit, and trailing stop orders
           await this.createStopOrders(exchange, position, riskManagement);
+
+          // Record trade in database for analytics
+          try {
+            const tradeData: InsertTrade = {
+              exchange,
+              symbol,
+              side: decision.action,
+              positionSide: position.side,
+              entryPrice: position.entryPrice,
+              quantity: position.quantity,
+              leverage: effectiveLeverage,
+              fees: fee,
+              executionMode,
+              algorithmId: algorithm.id,
+              algorithmName: algorithm.name,
+              status: "open",
+              stopLossPrice: position.stopLossPrice || null,
+              takeProfitPrice: position.takeProfitPrice || null,
+            };
+
+            const savedTrade = await storage.createTrade(tradeData);
+            positionToTradeId.set(position.id, savedTrade.id);
+          } catch (err) {
+            console.error("Failed to save trade to database:", err);
+          }
         }
       } else if (decision.action === "close") {
         const positions = await storage.getPositions(exchange);
@@ -581,6 +633,9 @@ class TradingBot {
               exchange,
             },
           });
+
+          // Update trade record in database
+          await this.updateTradeOnClose(position, ticker.lastPrice, "algorithm");
         }
       }
     } catch (error) {
@@ -601,6 +656,61 @@ class TradingBot {
       return entryPrice * (1 - marginRatio + 0.005); // 0.5% maintenance margin
     } else {
       return entryPrice * (1 + marginRatio - 0.005);
+    }
+  }
+
+  private async updateTradeOnClose(
+    position: Position,
+    exitPrice: number,
+    closeReason: string
+  ): Promise<void> {
+    try {
+      // First try the in-memory map
+      let tradeId = positionToTradeId.get(position.id);
+      
+      // If not in map (e.g., after restart), try to find by position data
+      if (!tradeId) {
+        // Look up open trades matching this position's entry parameters
+        const trades = await storage.getTrades({
+          symbol: position.symbol,
+          status: "open",
+          limit: 10,
+        });
+        
+        // Find a matching trade (same entry price, quantity, side)
+        const matchingTrade = trades.find(t => 
+          Math.abs(t.entryPrice - position.entryPrice) < 0.01 &&
+          Math.abs(t.quantity - position.quantity) < 0.0001 &&
+          t.positionSide === position.side
+        );
+        
+        if (matchingTrade) {
+          tradeId = matchingTrade.id;
+        }
+      }
+
+      if (tradeId) {
+        // Calculate PnL
+        const pnl = position.side === "long"
+          ? (exitPrice - position.entryPrice) * position.quantity
+          : (position.entryPrice - exitPrice) * position.quantity;
+        
+        const pnlPercent = ((exitPrice - position.entryPrice) / position.entryPrice) * 100 *
+          (position.side === "long" ? 1 : -1);
+
+        await storage.updateTrade(tradeId, {
+          exitPrice,
+          pnl,
+          pnlPercent,
+          status: "closed",
+          closedAt: new Date(),
+          closeReason,
+        });
+
+        positionToTradeId.delete(position.id);
+      }
+    } catch (err) {
+      console.error("Failed to update trade in database:", err);
     }
   }
 
