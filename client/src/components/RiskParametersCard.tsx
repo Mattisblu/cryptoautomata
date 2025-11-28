@@ -26,10 +26,21 @@ const defaultRiskParams: RiskParameters = {
   breakEvenTrigger: 2,
 };
 
+interface InputState {
+  maxPositionSize: string;
+  maxLeverage: string;
+  maxDailyLoss: string;
+}
+
 export function RiskParametersCard() {
   const { toast } = useToast();
   const [params, setParams] = useState<RiskParameters>(defaultRiskParams);
   const [hasChanges, setHasChanges] = useState(false);
+  const [inputValues, setInputValues] = useState<InputState>({
+    maxPositionSize: "1000",
+    maxLeverage: "10",
+    maxDailyLoss: "1000",
+  });
 
   const { data, isLoading } = useQuery<{ success: boolean; params: RiskParameters }>({
     queryKey: ['/api/risk-parameters'],
@@ -37,9 +48,15 @@ export function RiskParametersCard() {
 
   useEffect(() => {
     if (data?.params) {
-      setParams({
+      const mergedParams = {
         ...defaultRiskParams,
         ...data.params,
+      };
+      setParams(mergedParams);
+      setInputValues({
+        maxPositionSize: String(mergedParams.maxPositionSize),
+        maxLeverage: String(mergedParams.maxLeverage),
+        maxDailyLoss: String(mergedParams.maxDailyLoss),
       });
       setHasChanges(false);
     }
@@ -71,13 +88,38 @@ export function RiskParametersCard() {
     setHasChanges(true);
   };
 
+  const handleInputChange = (key: keyof InputState, value: string) => {
+    setInputValues(prev => ({ ...prev, [key]: value }));
+    const numValue = parseFloat(value);
+    if (!isNaN(numValue) && numValue >= 0) {
+      updateParam(key, numValue);
+    } else if (value === "") {
+      setHasChanges(true);
+    }
+  };
+
+  const handleInputBlur = (key: keyof InputState) => {
+    const numValue = parseFloat(inputValues[key]);
+    if (isNaN(numValue) || numValue < 0 || inputValues[key] === "") {
+      setInputValues(prev => ({ ...prev, [key]: String(params[key]) }));
+    } else {
+      setInputValues(prev => ({ ...prev, [key]: String(numValue) }));
+    }
+  };
+
   const handleSave = () => {
     saveMutation.mutate(params);
   };
 
   const handleReset = () => {
     if (data?.params) {
-      setParams({ ...defaultRiskParams, ...data.params });
+      const mergedParams = { ...defaultRiskParams, ...data.params };
+      setParams(mergedParams);
+      setInputValues({
+        maxPositionSize: String(mergedParams.maxPositionSize),
+        maxLeverage: String(mergedParams.maxLeverage),
+        maxDailyLoss: String(mergedParams.maxDailyLoss),
+      });
       setHasChanges(false);
     }
   };
@@ -123,9 +165,11 @@ export function RiskParametersCard() {
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground">Max Position Size ($)</Label>
               <Input
-                type="number"
-                value={params.maxPositionSize}
-                onChange={(e) => updateParam('maxPositionSize', Number(e.target.value))}
+                type="text"
+                inputMode="decimal"
+                value={inputValues.maxPositionSize}
+                onChange={(e) => handleInputChange('maxPositionSize', e.target.value)}
+                onBlur={() => handleInputBlur('maxPositionSize')}
                 data-testid="input-max-position-size"
                 className="font-mono"
               />
@@ -133,9 +177,11 @@ export function RiskParametersCard() {
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground">Max Leverage</Label>
               <Input
-                type="number"
-                value={params.maxLeverage}
-                onChange={(e) => updateParam('maxLeverage', Number(e.target.value))}
+                type="text"
+                inputMode="numeric"
+                value={inputValues.maxLeverage}
+                onChange={(e) => handleInputChange('maxLeverage', e.target.value)}
+                onBlur={() => handleInputBlur('maxLeverage')}
                 data-testid="input-max-leverage"
                 className="font-mono"
               />
@@ -145,9 +191,11 @@ export function RiskParametersCard() {
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Max Daily Loss ($)</Label>
             <Input
-              type="number"
-              value={params.maxDailyLoss}
-              onChange={(e) => updateParam('maxDailyLoss', Number(e.target.value))}
+              type="text"
+              inputMode="decimal"
+              value={inputValues.maxDailyLoss}
+              onChange={(e) => handleInputChange('maxDailyLoss', e.target.value)}
+              onBlur={() => handleInputBlur('maxDailyLoss')}
               data-testid="input-max-daily-loss"
               className="font-mono"
             />
