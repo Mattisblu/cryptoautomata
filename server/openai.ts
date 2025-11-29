@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import pLimit from "p-limit";
 import pRetry from "p-retry";
-import type { TradingAlgorithm, TradingMode, Ticker, Kline, Position, TradingRule, RiskManagement } from "@shared/schema";
+import type { TradingAlgorithm, TradingMode, ExecutionMode, Ticker, Kline, Position, TradingRule, RiskManagement, RiskParameters } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
@@ -32,6 +32,10 @@ interface MarketContext {
   positions?: Position[];
   tradingMode?: TradingMode;
   currentAlgorithm?: TradingAlgorithm;
+  timeframe?: string;
+  riskParameters?: RiskParameters;
+  executionMode?: ExecutionMode;
+  marketMaxLeverage?: number;
 }
 
 interface ChatResponse {
@@ -89,6 +93,14 @@ When analyzing market data:
 - Consider the 24h change percentage from ticker
 - Evaluate current positions for risk exposure
 
+When estimating trade cycle times or target hit probability:
+- Use the provided chart timeframe to understand candle duration (1m, 5m, 15m, 1h, etc.)
+- Use the "Average Move per Candle" metric to estimate time to reach targets
+- Calculate expected time: distance_to_target / avg_move_per_candle * candle_duration
+- Consider current volatility and 24h range when making time estimates
+- Factor in the user's SL/TP settings when calculating expected trade duration
+- For breakout strategies, estimate time differently than mean-reversion strategies
+
 Always wrap your algorithm JSON in a code block with \`\`\`json and \`\`\` markers.`;
 
 export async function analyzeAndRespond(
@@ -97,35 +109,60 @@ export async function analyzeAndRespond(
 ): Promise<ChatResponse> {
   const contextInfo = buildContextInfo(context);
 
-  const response = await limit(() =>
-    pRetry(
-      async () => {
-        const completion = await openai.chat.completions.create({
-          model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: `${contextInfo}\n\nUser request: ${userMessage}`,
-            },
-          ],
-          max_completion_tokens: 4096,
-        });
-        return completion.choices[0]?.message?.content || "";
-      },
-      {
-        retries: 5,
-        minTimeout: 2000,
-        maxTimeout: 64000,
-        factor: 2,
-        onFailedAttempt: (error) => {
-          if (!isRateLimitError(error)) {
-            throw new pRetry.AbortError(error);
+  const FALLBACK_MESSAGE = "I apologize, but I'm having trouble analyzing the market right now. Please try again in a moment. You can also check the chart timeframe and current price action for immediate insights.";
+  
+  let response: string = FALLBACK_MESSAGE;
+  
+  try {
+    const result = await limit(() =>
+      pRetry(
+        async () => {
+          const completion = await openai.chat.completions.create({
+            model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              {
+                role: "user",
+                content: `${contextInfo}\n\nUser request: ${userMessage}`,
+              },
+            ],
+            max_completion_tokens: 4096,
+          });
+          const content = completion.choices[0]?.message?.content;
+          
+          // Validate non-empty response - retry if empty
+          if (!content || content.trim().length === 0) {
+            console.warn("OpenAI returned empty response, retrying...");
+            throw new Error("Empty response from AI");
           }
+          
+          return content;
         },
-      }
-    )
-  );
+        {
+          retries: 3,
+          minTimeout: 1000,
+          maxTimeout: 30000,
+          factor: 2,
+          onFailedAttempt: (error) => {
+            console.warn(`AI attempt failed: ${error.message}`);
+            // Only abort for non-retryable errors (not rate limits or empty responses)
+            const message = error.message || String(error);
+            if (!isRateLimitError(error) && !message.includes("Empty response")) {
+              throw new pRetry.AbortError(error);
+            }
+          },
+        }
+      )
+    );
+    
+    // Only use result if it's a non-empty string
+    if (result && typeof result === 'string' && result.trim().length > 0) {
+      response = result;
+    }
+  } catch (error) {
+    console.error("AI analysis failed after retries:", error);
+    // response already defaults to FALLBACK_MESSAGE
+  }
 
   // Parse the response to extract algorithm if present
   const algorithm = extractAlgorithmFromResponse(response, context);
@@ -147,6 +184,30 @@ function buildContextInfo(context: MarketContext): string {
     parts.push(`Trading Mode: ${context.tradingMode}`);
   }
 
+  if (context.executionMode) {
+    parts.push(`Execution Mode: ${context.executionMode === "paper" ? "Paper Trading (Simulated)" : "Real Trading"}`);
+  }
+
+  if (context.timeframe) {
+    parts.push(`Chart Timeframe: ${context.timeframe}`);
+  }
+
+  if (context.marketMaxLeverage) {
+    parts.push(`Market Max Leverage: ${context.marketMaxLeverage}x`);
+  }
+
+  if (context.riskParameters) {
+    const rp = context.riskParameters;
+    parts.push(`
+User Risk Settings:
+- Max Position Size: $${rp.maxPositionSize}
+- Max Leverage: ${rp.maxLeverage}x
+- Stop-Loss: ${rp.autoStopLoss ? `${rp.stopLossPercent}% (enabled)` : "disabled"}
+- Take-Profit: ${rp.autoTakeProfit ? `${rp.takeProfitPercent}% (enabled)` : "disabled"}
+- Trailing Stop: ${rp.trailingStop ? `${rp.trailingStopPercent}% (enabled)` : "disabled"}
+- Max Daily Loss: $${rp.maxDailyLoss}`);
+  }
+
   if (context.ticker) {
     parts.push(`
 Current Ticker Data:
@@ -157,7 +218,7 @@ Current Ticker Data:
 - 24h Volume: ${context.ticker.volume24h}`);
   }
 
-  if (context.klines && context.klines.length > 0) {
+  if (context.klines && context.klines.length > 1) {
     const recentKlines = context.klines.slice(-20);
     const highs = recentKlines.map((k) => k.high);
     const lows = recentKlines.map((k) => k.low);
@@ -167,14 +228,22 @@ Current Ticker Data:
     const minLow = Math.min(...lows);
     const avgClose = closes.reduce((a, b) => a + b, 0) / closes.length;
     const trend = closes[closes.length - 1] > closes[0] ? "upward" : "downward";
+    
+    // Calculate volatility (requires at least 2 data points)
+    let avgMovePercent = 0;
+    if (closes.length >= 2) {
+      const priceChanges = closes.slice(1).map((c, i) => Math.abs((c - closes[i]) / closes[i]) * 100);
+      avgMovePercent = priceChanges.reduce((a, b) => a + b, 0) / priceChanges.length;
+    }
 
     parts.push(`
-Recent Price Analysis (last ${recentKlines.length} candles):
+Recent Price Analysis (last ${recentKlines.length} candles on ${context.timeframe || "unknown"} timeframe):
 - Trend: ${trend}
 - Recent High: ${maxHigh}
 - Recent Low: ${minLow}
 - Average Close: ${avgClose.toFixed(4)}
-- Current vs Average: ${((closes[closes.length - 1] / avgClose - 1) * 100).toFixed(2)}%`);
+- Current vs Average: ${((closes[closes.length - 1] / avgClose - 1) * 100).toFixed(2)}%
+- Average Move per Candle: ${avgMovePercent.toFixed(3)}%`);
   }
 
   if (context.positions && context.positions.length > 0) {
@@ -186,10 +255,14 @@ ${context.positions.map((p) => `- ${p.symbol} ${p.side.toUpperCase()} ${p.quanti
   }
 
   if (context.currentAlgorithm) {
+    const algo = context.currentAlgorithm;
+    const rm = algo.riskManagement;
     parts.push(`
-Current Algorithm: ${context.currentAlgorithm.name} v${context.currentAlgorithm.version}
-- Rules: ${context.currentAlgorithm.rules.length}
-- Status: ${context.currentAlgorithm.status}`);
+Current Algorithm: ${algo.name} v${algo.version}
+- Rules: ${algo.rules.length}
+- Status: ${algo.status}
+- Algorithm SL: ${rm.stopLossPercent}%, TP: ${rm.takeProfitPercent}%
+- Algorithm Leverage: ${rm.maxLeverage}x`);
   }
 
   return parts.length > 0 ? `Current Market Context:\n${parts.join("\n")}` : "";

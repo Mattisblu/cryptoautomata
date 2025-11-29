@@ -6,6 +6,7 @@ export function useWebSocket() {
   const {
     selectedExchange,
     selectedMarket,
+    timeframe,
     setTicker,
     setKlines,
     setTradeCycleState,
@@ -57,7 +58,7 @@ export function useWebSocket() {
               type: "subscribe",
               exchange: selectedExchange,
               symbol: selectedMarket.symbol,
-              timeframe: "15m",
+              timeframe: timeframe,
             })
           );
         }
@@ -145,7 +146,7 @@ export function useWebSocket() {
     } catch (error) {
       console.error("WebSocket connection failed:", error);
     }
-  }, [selectedExchange, selectedMarket, setTicker, setKlines, setTradeCycleState, setOrders, setPositions, setConnectionState]);
+  }, [selectedExchange, selectedMarket, timeframe, setTicker, setKlines, setTradeCycleState, setOrders, setPositions, setConnectionState]);
 
   const subscribe = useCallback(
     (symbol: string, timeframe: string = "15m") => {
@@ -183,12 +184,12 @@ export function useWebSocket() {
     };
   }, []);
 
-  // Re-subscribe when market changes
+  // Re-subscribe when market or timeframe changes
   useEffect(() => {
     if (isConnected && selectedMarket && selectedExchange) {
-      subscribe(selectedMarket.symbol);
+      subscribe(selectedMarket.symbol, timeframe);
     }
-  }, [isConnected, selectedMarket, selectedExchange, subscribe]);
+  }, [isConnected, selectedMarket, selectedExchange, timeframe, subscribe]);
 
   return {
     isConnected,

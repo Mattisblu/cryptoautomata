@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createChart, ColorType, type IChartApi, type ISeriesApi, type CandlestickData, type Time } from "lightweight-charts";
+import { createChart, ColorType, CandlestickSeries, type IChartApi, type ISeriesApi, type CandlestickData, type Time } from "lightweight-charts";
 import { useTradingContext } from "@/lib/tradingContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,11 +15,10 @@ const timeframes = [
 ];
 
 export function KlineChart() {
-  const { klines, selectedMarket, theme } = useTradingContext();
+  const { klines, selectedMarket, theme, timeframe, setTimeframe } = useTradingContext();
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const [selectedTimeframe, setSelectedTimeframe] = useState("15m");
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
@@ -59,7 +58,7 @@ export function KlineChart() {
       handleScroll: { vertTouchDrag: true },
     });
 
-    const candlestickSeries = chart.addCandlestickSeries({
+    const candlestickSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#22c55e",
       downColor: "#ef4444",
       borderUpColor: "#22c55e",
@@ -132,10 +131,10 @@ export function KlineChart() {
           {timeframes.map((tf) => (
             <Button
               key={tf.value}
-              variant={selectedTimeframe === tf.value ? "secondary" : "ghost"}
+              variant={timeframe === tf.value ? "secondary" : "ghost"}
               size="sm"
               className="h-7 px-2 text-xs font-mono"
-              onClick={() => setSelectedTimeframe(tf.value)}
+              onClick={() => setTimeframe(tf.value)}
               data-testid={`button-timeframe-${tf.value}`}
             >
               {tf.label}

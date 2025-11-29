@@ -141,6 +141,9 @@ export function AIChatbot() {
     positions,
     tradingMode,
     activeAlgorithm,
+    timeframe,
+    riskParameters,
+    executionMode,
   } = useTradingContext();
   const [input, setInput] = useState("");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -157,14 +160,19 @@ export function AIChatbot() {
           positions,
           tradingMode,
           currentAlgorithm: activeAlgorithm,
+          timeframe,
+          riskParameters,
+          executionMode,
+          marketMaxLeverage: selectedMarket?.maxLeverage,
         },
       });
       return response.json();
     },
     onSuccess: (data: { message: string; algorithm?: any }) => {
+      const content = data.message?.trim() || "I apologize, but I couldn't generate a response. Please try again.";
       addChatMessage({
         role: "assistant",
-        content: data.message,
+        content,
         algorithmJson: data.algorithm,
       });
     },

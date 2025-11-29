@@ -35,7 +35,7 @@ interface InputState {
 
 export function RiskParametersCard() {
   const { toast } = useToast();
-  const { selectedMarket } = useTradingContext();
+  const { selectedMarket, setRiskParameters } = useTradingContext();
   const [params, setParams] = useState<RiskParameters>(defaultRiskParams);
   const [hasChanges, setHasChanges] = useState(false);
   const [inputValues, setInputValues] = useState<InputState>({
@@ -64,16 +64,18 @@ export function RiskParametersCard() {
         maxDailyLoss: String(mergedParams.maxDailyLoss),
       });
       setHasChanges(false);
+      setRiskParameters(mergedParams);
     }
-  }, [data]);
+  }, [data, setRiskParameters]);
 
   const saveMutation = useMutation({
     mutationFn: async (newParams: RiskParameters) => {
       return apiRequest('POST', '/api/risk-parameters', newParams);
     },
-    onSuccess: () => {
+    onSuccess: (_, savedParams) => {
       queryClient.invalidateQueries({ queryKey: ['/api/risk-parameters'] });
       setHasChanges(false);
+      setRiskParameters(savedParams);
       toast({
         title: "Risk parameters saved",
         description: "Your risk management settings have been updated.",
@@ -130,6 +132,7 @@ export function RiskParametersCard() {
         maxDailyLoss: String(mergedParams.maxDailyLoss),
       });
       setHasChanges(false);
+      setRiskParameters(mergedParams);
     }
   };
 

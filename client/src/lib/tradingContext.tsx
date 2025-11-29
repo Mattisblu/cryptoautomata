@@ -13,6 +13,7 @@ import type {
   TradeCycleState,
   ConnectionState,
   ApiCredentials,
+  RiskParameters,
 } from "@shared/schema";
 
 interface TradingContextValue {
@@ -31,6 +32,14 @@ interface TradingContextValue {
   // Execution mode (Paper vs Real)
   executionMode: ExecutionMode;
   setExecutionMode: (mode: ExecutionMode) => void;
+  
+  // Chart timeframe
+  timeframe: string;
+  setTimeframe: (timeframe: string) => void;
+  
+  // Risk parameters
+  riskParameters: RiskParameters | null;
+  setRiskParameters: (params: RiskParameters | null) => void;
   
   // Market data
   ticker: Ticker | null;
@@ -82,6 +91,24 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   
   // Execution mode (Paper vs Real trading)
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("paper");
+  
+  // Chart timeframe
+  const [timeframe, setTimeframe] = useState<string>("15m");
+  
+  // Risk parameters (initialized with defaults so AI always has context)
+  const defaultRiskParams: RiskParameters = {
+    maxPositionSize: 1000,
+    maxLeverage: 10,
+    stopLossPercent: 2,
+    takeProfitPercent: 4,
+    maxDailyLoss: 1000,
+    trailingStop: false,
+    trailingStopPercent: 1.5,
+    autoStopLoss: true,
+    autoTakeProfit: true,
+    breakEvenTrigger: 2,
+  };
+  const [riskParameters, setRiskParameters] = useState<RiskParameters | null>(defaultRiskParams);
   
   // Market data
   const [ticker, setTicker] = useState<Ticker | null>(null);
@@ -162,6 +189,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         setTradingMode,
         executionMode,
         setExecutionMode,
+        timeframe,
+        setTimeframe,
+        riskParameters,
+        setRiskParameters,
         ticker,
         setTicker,
         klines,
