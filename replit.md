@@ -4,20 +4,17 @@
 A professional AI-powered cryptocurrency futures trading application with automated trading algorithms, real-time market data, and intelligent trade execution for Coinstore and BYDFI exchanges.
 
 ## Current State
-- **Phase**: Phase 3 - Analytics & Persistence
+- **Phase**: Phase 4 - Strategy Versioning & A/B Testing
 - **Last Updated**: November 2024
 
 ## Recent Changes
-- Added market-specific leverage limits (each trading pair has its own max leverage)
-- UI displays market's max leverage and warns if user setting exceeds it
-- Trading bot enforces leverage limits from algorithm, exchange, and market levels
-- Fixed risk parameter inputs (no more leading zeros, proper clearing)
-- Added PostgreSQL database for persistent trade history storage
-- Created Trade History Analytics Dashboard with performance metrics
-- Implemented cumulative PnL chart and win/loss distribution visualization
-- Trading bot now records trades to database when positions open/close
-- Added API endpoints for trade analytics and historical data
-- Database tables: trades, daily_summaries, algorithm_performance
+- Added Strategy Management page (/strategies) with algorithm version history and A/B testing
+- Algorithm versioning: save snapshots, view history, restore previous versions
+- A/B testing: compare two strategies side-by-side with PnL tracking
+- New API routes for algorithm versions and A/B test management
+- Database tables: algorithmVersions, abTests (in addition to existing tables)
+- Navigation: Added Strategies link in Dashboard header
+- Previous: Market-specific leverage limits, Analytics Dashboard, trade history persistence
 - Previous features: BYDFI support, Paper/Real toggle, Risk Management with SL/TP/Trailing stops
 
 ## Architecture
@@ -55,7 +52,8 @@ client/
 │   │   └── tradingContext.tsx
 │   └── pages/
 │       ├── Dashboard.tsx
-│       └── Analytics.tsx     # Trade history & performance dashboard
+│       ├── Analytics.tsx     # Trade history & performance dashboard
+│       └── Strategies.tsx    # Algorithm versioning & A/B testing
 server/
 ├── db.ts              # Database connection (Drizzle + Neon)
 ├── routes.ts          # API endpoints
@@ -122,6 +120,21 @@ shared/
 - `GET /api/algorithms` - List saved algorithms
 - `GET /api/algorithms/:id` - Get specific algorithm
 - `DELETE /api/algorithms/:id` - Delete algorithm
+
+### Algorithm Versions
+- `GET /api/algorithms/:id/versions` - Get version history for an algorithm
+- `POST /api/algorithms/:id/versions` - Save a new version snapshot
+- `GET /api/algorithm-versions/:versionId` - Get specific version details
+- `POST /api/algorithm-versions/:versionId/restore` - Restore algorithm to a previous version
+
+### A/B Tests
+- `GET /api/ab-tests` - List all A/B tests
+- `GET /api/ab-tests/:id` - Get specific A/B test
+- `POST /api/ab-tests` - Create a new A/B test
+- `POST /api/ab-tests/:id/start` - Start an A/B test
+- `POST /api/ab-tests/:id/complete` - Complete an A/B test and determine winner
+- `PATCH /api/ab-tests/:id/results` - Update test results (PnL, trades, win rate)
+- `DELETE /api/ab-tests/:id` - Delete an A/B test
 
 ### Trade Cycle
 - `POST /api/trading/start` - Start trading cycle (includes executionMode: "paper" | "real")

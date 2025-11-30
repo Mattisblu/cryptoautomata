@@ -348,6 +348,269 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============ ALGORITHM VERSIONS ROUTES ============
+
+  // Get all versions of an algorithm
+  app.get("/api/algorithms/:id/versions", async (req, res) => {
+    try {
+      const versions = await storage.getAlgorithmVersions(req.params.id);
+      res.json({ success: true, versions });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Save a new version of an algorithm
+  app.post("/api/algorithms/:id/versions", async (req, res) => {
+    try {
+      const algorithm = await storage.getAlgorithm(req.params.id);
+      if (!algorithm) {
+        return res.status(404).json({ success: false, error: "Algorithm not found" });
+      }
+
+      // Get the latest version number
+      const latestVersion = await storage.getLatestAlgorithmVersion(req.params.id);
+      const newVersionNumber = latestVersion ? latestVersion.version + 1 : 1;
+
+      const versionData = {
+        algorithmId: req.params.id,
+        version: newVersionNumber,
+        name: algorithm.name,
+        mode: algorithm.mode,
+        symbol: algorithm.symbol,
+        rules: JSON.stringify(algorithm.rules),
+        riskManagement: JSON.stringify(algorithm.riskManagement),
+        changeNotes: req.body.changeNotes || null,
+        parentVersionId: latestVersion?.id || null,
+      };
+
+      const newVersion = await storage.createAlgorithmVersion(versionData);
+
+      // Update the algorithm's version number
+      await storage.updateAlgorithm({
+        ...algorithm,
+        version: newVersionNumber,
+        updatedAt: Date.now(),
+      });
+
+      res.json({ success: true, version: newVersion });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get a specific version
+  app.get("/api/algorithm-versions/:versionId", async (req, res) => {
+    try {
+      const version = await storage.getAlgorithmVersion(parseInt(req.params.versionId));
+      if (!version) {
+        return res.status(404).json({ success: false, error: "Version not found" });
+      }
+      res.json({ success: true, version });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Restore a specific version (make it the current algorithm)
+  app.post("/api/algorithm-versions/:versionId/restore", async (req, res) => {
+    try {
+      const version = await storage.getAlgorithmVersion(parseInt(req.params.versionId));
+      if (!version) {
+        return res.status(404).json({ success: false, error: "Version not found" });
+      }
+
+      const algorithm = await storage.getAlgorithm(version.algorithmId);
+      if (!algorithm) {
+        return res.status(404).json({ success: false, error: "Algorithm not found" });
+      }
+
+      // Restore the algorithm to this version
+      const restoredAlgorithm = {
+        ...algorithm,
+        name: version.name,
+        mode: version.mode as "ai-trading" | "ai-scalping" | "manual",
+        symbol: version.symbol,
+        rules: JSON.parse(version.rules),
+        riskManagement: JSON.parse(version.riskManagement),
+        version: version.version,
+        updatedAt: Date.now(),
+      };
+
+      await storage.updateAlgorithm(restoredAlgorithm);
+      res.json({ success: true, algorithm: restoredAlgorithm });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // ============ A/B TESTS ROUTES ============
+
+  // Get all A/B tests
+  app.get("/api/ab-tests", async (req, res) => {
+    try {
+      const tests = await storage.getAbTests();
+      res.json({ success: true, tests });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get a specific A/B test
+  app.get("/api/ab-tests/:id", async (req, res) => {
+    try {
+      const test = await storage.getAbTest(parseInt(req.params.id));
+      if (!test) {
+        return res.status(404).json({ success: false, error: "A/B test not found" });
+      }
+      res.json({ success: true, test });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Create a new A/B test
+  app.post("/api/ab-tests", async (req, res) => {
+    try {
+      const { name, description, algorithmAId, algorithmBId, exchange, symbol } = req.body;
+
+      if (!name || !algorithmAId || !algorithmBId || !exchange || !symbol) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Name, both algorithm IDs, exchange, and symbol are required" 
+        });
+      }
+
+      const algorithmA = await storage.getAlgorithm(algorithmAId);
+      const algorithmB = await storage.getAlgorithm(algorithmBId);
+
+      if (!algorithmA || !algorithmB) {
+        return res.status(404).json({ 
+          success: false, 
+          error: "One or both algorithms not found" 
+        });
+      }
+
+      const testData = {
+        name,
+        description: description || null,
+        algorithmAId,
+        algorithmAName: algorithmA.name,
+        algorithmAVersion: algorithmA.version,
+        algorithmBId,
+        algorithmBName: algorithmB.name,
+        algorithmBVersion: algorithmB.version,
+        exchange,
+        symbol,
+        status: "pending",
+      };
+
+      const newTest = await storage.createAbTest(testData);
+      res.json({ success: true, test: newTest });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Start an A/B test
+  app.post("/api/ab-tests/:id/start", async (req, res) => {
+    try {
+      const test = await storage.getAbTest(parseInt(req.params.id));
+      if (!test) {
+        return res.status(404).json({ success: false, error: "A/B test not found" });
+      }
+
+      if (test.status !== "pending") {
+        return res.status(400).json({ 
+          success: false, 
+          error: "A/B test is not in pending status" 
+        });
+      }
+
+      const updatedTest = await storage.updateAbTest(test.id, {
+        status: "running",
+        startedAt: new Date(),
+      });
+
+      res.json({ success: true, test: updatedTest });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Complete/stop an A/B test
+  app.post("/api/ab-tests/:id/complete", async (req, res) => {
+    try {
+      const test = await storage.getAbTest(parseInt(req.params.id));
+      if (!test) {
+        return res.status(404).json({ success: false, error: "A/B test not found" });
+      }
+
+      // Determine winner based on PnL
+      let winnerId = null;
+      if (test.pnlA > test.pnlB) {
+        winnerId = test.algorithmAId;
+      } else if (test.pnlB > test.pnlA) {
+        winnerId = test.algorithmBId;
+      }
+
+      const updatedTest = await storage.updateAbTest(test.id, {
+        status: "completed",
+        endedAt: new Date(),
+        winnerId,
+      });
+
+      res.json({ success: true, test: updatedTest });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Update A/B test results (used by trading bot to record trades)
+  app.patch("/api/ab-tests/:id/results", async (req, res) => {
+    try {
+      const { algorithmId, pnl, won } = req.body;
+      const test = await storage.getAbTest(parseInt(req.params.id));
+      
+      if (!test) {
+        return res.status(404).json({ success: false, error: "A/B test not found" });
+      }
+
+      const updates: Partial<typeof test> = {};
+      
+      if (algorithmId === test.algorithmAId) {
+        updates.tradesA = (test.tradesA || 0) + 1;
+        updates.pnlA = (test.pnlA || 0) + pnl;
+        if (updates.tradesA > 0) {
+          const winningA = won ? 1 : 0;
+          updates.winRateA = ((test.winRateA || 0) * (test.tradesA || 0) + winningA * 100) / updates.tradesA;
+        }
+      } else if (algorithmId === test.algorithmBId) {
+        updates.tradesB = (test.tradesB || 0) + 1;
+        updates.pnlB = (test.pnlB || 0) + pnl;
+        if (updates.tradesB > 0) {
+          const winningB = won ? 1 : 0;
+          updates.winRateB = ((test.winRateB || 0) * (test.tradesB || 0) + winningB * 100) / updates.tradesB;
+        }
+      }
+
+      const updatedTest = await storage.updateAbTest(test.id, updates);
+      res.json({ success: true, test: updatedTest });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Delete an A/B test
+  app.delete("/api/ab-tests/:id", async (req, res) => {
+    try {
+      await storage.deleteAbTest(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   // ============ TRADING CYCLE ROUTES ============
 
   app.post("/api/trading/start", async (req, res) => {

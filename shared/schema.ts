@@ -63,10 +63,53 @@ export const algorithmPerformance = pgTable("algorithm_performance", {
   lastUpdated: timestamp("last_updated").notNull().defaultNow(),
 });
 
+// Algorithm version history - stores all versions of an algorithm for tracking changes
+export const algorithmVersions = pgTable("algorithm_versions", {
+  id: serial("id").primaryKey(),
+  algorithmId: text("algorithm_id").notNull(), // Parent algorithm ID
+  version: integer("version").notNull(),
+  name: text("name").notNull(),
+  mode: text("mode").notNull(), // ai-trading, ai-scalping, manual
+  symbol: text("symbol").notNull(),
+  rules: text("rules").notNull(), // JSON string of TradingRule[]
+  riskManagement: text("risk_management").notNull(), // JSON string of RiskManagement
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  changeNotes: text("change_notes"), // Description of what changed
+  parentVersionId: integer("parent_version_id"), // Reference to the version this was based on
+});
+
+// A/B Tests - run two algorithms simultaneously to compare performance
+export const abTests = pgTable("ab_tests", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  algorithmAId: text("algorithm_a_id").notNull(),
+  algorithmAName: text("algorithm_a_name").notNull(),
+  algorithmAVersion: integer("algorithm_a_version").notNull(),
+  algorithmBId: text("algorithm_b_id").notNull(),
+  algorithmBName: text("algorithm_b_name").notNull(),
+  algorithmBVersion: integer("algorithm_b_version").notNull(),
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  status: text("status").notNull().default("pending"), // pending, running, completed, cancelled
+  startedAt: timestamp("started_at"),
+  endedAt: timestamp("ended_at"),
+  winnerId: text("winner_id"), // Which algorithm won
+  tradesA: integer("trades_a").notNull().default(0),
+  tradesB: integer("trades_b").notNull().default(0),
+  pnlA: real("pnl_a").notNull().default(0),
+  pnlB: real("pnl_b").notNull().default(0),
+  winRateA: real("win_rate_a").default(0),
+  winRateB: real("win_rate_b").default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Relations
 export const tradesRelations = relations(trades, ({ }) => ({}));
 export const dailySummariesRelations = relations(dailySummaries, ({ }) => ({}));
 export const algorithmPerformanceRelations = relations(algorithmPerformance, ({ }) => ({}));
+export const algorithmVersionsRelations = relations(algorithmVersions, ({ }) => ({}));
+export const abTestsRelations = relations(abTests, ({ }) => ({}));
 
 // Insert schemas
 export const insertTradeSchema = createInsertSchema(trades).omit({ id: true });
@@ -80,6 +123,14 @@ export type DailySummary = typeof dailySummaries.$inferSelect;
 export const insertAlgorithmPerformanceSchema = createInsertSchema(algorithmPerformance).omit({ id: true });
 export type InsertAlgorithmPerformance = z.infer<typeof insertAlgorithmPerformanceSchema>;
 export type AlgorithmPerformance = typeof algorithmPerformance.$inferSelect;
+
+export const insertAlgorithmVersionSchema = createInsertSchema(algorithmVersions).omit({ id: true });
+export type InsertAlgorithmVersion = z.infer<typeof insertAlgorithmVersionSchema>;
+export type AlgorithmVersion = typeof algorithmVersions.$inferSelect;
+
+export const insertAbTestSchema = createInsertSchema(abTests).omit({ id: true });
+export type InsertAbTest = z.infer<typeof insertAbTestSchema>;
+export type AbTest = typeof abTests.$inferSelect;
 
 // ============ EXISTING TYPES (Non-database) ============
 

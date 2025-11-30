@@ -19,8 +19,12 @@ import type {
   InsertTrade,
   DailySummary,
   AlgorithmPerformance,
+  AlgorithmVersion,
+  InsertAlgorithmVersion,
+  AbTest,
+  InsertAbTest,
 } from "@shared/schema";
-import { trades, dailySummaries, algorithmPerformance } from "@shared/schema";
+import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 
@@ -113,6 +117,20 @@ export interface IStorage {
   }>;
   getDailySummaries(days?: number): Promise<DailySummary[]>;
   getAlgorithmPerformance(algorithmId?: string): Promise<AlgorithmPerformance[]>;
+
+  // Algorithm Versions
+  createAlgorithmVersion(version: InsertAlgorithmVersion): Promise<AlgorithmVersion>;
+  getAlgorithmVersions(algorithmId: string): Promise<AlgorithmVersion[]>;
+  getAlgorithmVersion(id: number): Promise<AlgorithmVersion | null>;
+  getLatestAlgorithmVersion(algorithmId: string): Promise<AlgorithmVersion | null>;
+
+  // A/B Tests
+  createAbTest(test: InsertAbTest): Promise<AbTest>;
+  updateAbTest(id: number, updates: Partial<AbTest>): Promise<AbTest | null>;
+  getAbTests(): Promise<AbTest[]>;
+  getAbTest(id: number): Promise<AbTest | null>;
+  getActiveAbTests(): Promise<AbTest[]>;
+  deleteAbTest(id: number): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -487,6 +505,81 @@ export class MemStorage implements IStorage {
         .where(eq(algorithmPerformance.algorithmId, algorithmId));
     }
     return db.select().from(algorithmPerformance);
+  }
+
+  // ============ ALGORITHM VERSIONS ============
+
+  async createAlgorithmVersion(version: InsertAlgorithmVersion): Promise<AlgorithmVersion> {
+    const [newVersion] = await db.insert(algorithmVersions).values(version).returning();
+    return newVersion;
+  }
+
+  async getAlgorithmVersions(algorithmId: string): Promise<AlgorithmVersion[]> {
+    return db
+      .select()
+      .from(algorithmVersions)
+      .where(eq(algorithmVersions.algorithmId, algorithmId))
+      .orderBy(desc(algorithmVersions.version));
+  }
+
+  async getAlgorithmVersion(id: number): Promise<AlgorithmVersion | null> {
+    const [version] = await db
+      .select()
+      .from(algorithmVersions)
+      .where(eq(algorithmVersions.id, id));
+    return version || null;
+  }
+
+  async getLatestAlgorithmVersion(algorithmId: string): Promise<AlgorithmVersion | null> {
+    const [version] = await db
+      .select()
+      .from(algorithmVersions)
+      .where(eq(algorithmVersions.algorithmId, algorithmId))
+      .orderBy(desc(algorithmVersions.version))
+      .limit(1);
+    return version || null;
+  }
+
+  // ============ A/B TESTS ============
+
+  async createAbTest(test: InsertAbTest): Promise<AbTest> {
+    const [newTest] = await db.insert(abTests).values(test).returning();
+    return newTest;
+  }
+
+  async updateAbTest(id: number, updates: Partial<AbTest>): Promise<AbTest | null> {
+    const [updated] = await db
+      .update(abTests)
+      .set(updates)
+      .where(eq(abTests.id, id))
+      .returning();
+    return updated || null;
+  }
+
+  async getAbTests(): Promise<AbTest[]> {
+    return db
+      .select()
+      .from(abTests)
+      .orderBy(desc(abTests.createdAt));
+  }
+
+  async getAbTest(id: number): Promise<AbTest | null> {
+    const [test] = await db
+      .select()
+      .from(abTests)
+      .where(eq(abTests.id, id));
+    return test || null;
+  }
+
+  async getActiveAbTests(): Promise<AbTest[]> {
+    return db
+      .select()
+      .from(abTests)
+      .where(eq(abTests.status, "running"));
+  }
+
+  async deleteAbTest(id: number): Promise<void> {
+    await db.delete(abTests).where(eq(abTests.id, id));
   }
 }
 
