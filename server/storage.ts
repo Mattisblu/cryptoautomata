@@ -23,8 +23,11 @@ import type {
   InsertAlgorithmVersion,
   AbTest,
   InsertAbTest,
+  Notification,
+  InsertNotification,
+  NotificationSettings,
 } from "@shared/schema";
-import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests } from "@shared/schema";
+import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 
@@ -131,6 +134,19 @@ export interface IStorage {
   getAbTest(id: number): Promise<AbTest | null>;
   getActiveAbTests(): Promise<AbTest[]>;
   deleteAbTest(id: number): Promise<void>;
+
+  // Notifications
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  getNotifications(limit?: number): Promise<Notification[]>;
+  getUnreadNotifications(): Promise<Notification[]>;
+  markNotificationRead(id: number): Promise<void>;
+  markAllNotificationsRead(): Promise<void>;
+  deleteNotification(id: number): Promise<void>;
+  clearNotifications(): Promise<void>;
+
+  // Notification Settings
+  getNotificationSettings(): Promise<NotificationSettings | null>;
+  saveNotificationSettings(settings: Partial<NotificationSettings>): Promise<NotificationSettings>;
 }
 
 export class MemStorage implements IStorage {
@@ -580,6 +596,93 @@ export class MemStorage implements IStorage {
 
   async deleteAbTest(id: number): Promise<void> {
     await db.delete(abTests).where(eq(abTests.id, id));
+  }
+
+  // ============ NOTIFICATIONS ============
+
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const [newNotification] = await db.insert(notifications).values(notification).returning();
+    return newNotification;
+  }
+
+  async getNotifications(limit = 50): Promise<Notification[]> {
+    return db
+      .select()
+      .from(notifications)
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit);
+  }
+
+  async getUnreadNotifications(): Promise<Notification[]> {
+    return db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.isRead, false))
+      .orderBy(desc(notifications.createdAt));
+  }
+
+  async markNotificationRead(id: number): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(eq(notifications.id, id));
+  }
+
+  async markAllNotificationsRead(): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(eq(notifications.isRead, false));
+  }
+
+  async deleteNotification(id: number): Promise<void> {
+    await db.delete(notifications).where(eq(notifications.id, id));
+  }
+
+  async clearNotifications(): Promise<void> {
+    await db.delete(notifications);
+  }
+
+  // ============ NOTIFICATION SETTINGS ============
+
+  private defaultSettings: NotificationSettings = {
+    id: 1,
+    emailEnabled: false,
+    emailAddress: null,
+    browserEnabled: true,
+    soundEnabled: true,
+    tradeOpenEnabled: true,
+    tradeCloseEnabled: true,
+    stopLossEnabled: true,
+    takeProfitEnabled: true,
+    dailySummaryEnabled: false,
+    minPnlAlert: null,
+  };
+
+  async getNotificationSettings(): Promise<NotificationSettings | null> {
+    const [settings] = await db.select().from(notificationSettings).limit(1);
+    return settings || this.defaultSettings;
+  }
+
+  async saveNotificationSettings(settings: Partial<NotificationSettings>): Promise<NotificationSettings> {
+    const existing = await this.getNotificationSettings();
+    
+    if (existing && existing.id !== 1) {
+      // Update existing
+      const [updated] = await db
+        .update(notificationSettings)
+        .set(settings)
+        .where(eq(notificationSettings.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      // Create new
+      const [newSettings] = await db
+        .insert(notificationSettings)
+        .values({ ...this.defaultSettings, ...settings })
+        .returning();
+      return newSettings;
+    }
   }
 }
 

@@ -78,6 +78,35 @@ export const algorithmVersions = pgTable("algorithm_versions", {
   parentVersionId: integer("parent_version_id"), // Reference to the version this was based on
 });
 
+// Notifications - store user notifications for trade events
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(), // "trade_open", "trade_close", "stop_loss", "take_profit", "error", "info"
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  exchange: text("exchange"),
+  symbol: text("symbol"),
+  pnl: real("pnl"),
+  isRead: boolean("is_read").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  data: text("data"), // JSON string with additional data
+});
+
+// Notification settings - user preferences for notifications
+export const notificationSettings = pgTable("notification_settings", {
+  id: serial("id").primaryKey(),
+  emailEnabled: boolean("email_enabled").notNull().default(false),
+  emailAddress: text("email_address"),
+  browserEnabled: boolean("browser_enabled").notNull().default(true),
+  soundEnabled: boolean("sound_enabled").notNull().default(true),
+  tradeOpenEnabled: boolean("trade_open_enabled").notNull().default(true),
+  tradeCloseEnabled: boolean("trade_close_enabled").notNull().default(true),
+  stopLossEnabled: boolean("stop_loss_enabled").notNull().default(true),
+  takeProfitEnabled: boolean("take_profit_enabled").notNull().default(true),
+  dailySummaryEnabled: boolean("daily_summary_enabled").notNull().default(false),
+  minPnlAlert: real("min_pnl_alert"), // Only notify if PnL exceeds this amount
+});
+
 // A/B Tests - run two algorithms simultaneously to compare performance
 export const abTests = pgTable("ab_tests", {
   id: serial("id").primaryKey(),
@@ -110,6 +139,8 @@ export const dailySummariesRelations = relations(dailySummaries, ({ }) => ({}));
 export const algorithmPerformanceRelations = relations(algorithmPerformance, ({ }) => ({}));
 export const algorithmVersionsRelations = relations(algorithmVersions, ({ }) => ({}));
 export const abTestsRelations = relations(abTests, ({ }) => ({}));
+export const notificationsRelations = relations(notifications, ({ }) => ({}));
+export const notificationSettingsRelations = relations(notificationSettings, ({ }) => ({}));
 
 // Insert schemas
 export const insertTradeSchema = createInsertSchema(trades).omit({ id: true });
@@ -131,6 +162,18 @@ export type AlgorithmVersion = typeof algorithmVersions.$inferSelect;
 export const insertAbTestSchema = createInsertSchema(abTests).omit({ id: true });
 export type InsertAbTest = z.infer<typeof insertAbTestSchema>;
 export type AbTest = typeof abTests.$inferSelect;
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true });
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
+
+export const insertNotificationSettingsSchema = createInsertSchema(notificationSettings).omit({ id: true });
+export type InsertNotificationSettings = z.infer<typeof insertNotificationSettingsSchema>;
+export type NotificationSettings = typeof notificationSettings.$inferSelect;
+
+// Notification types for frontend
+export const notificationTypes = ["trade_open", "trade_close", "stop_loss", "take_profit", "trailing_stop", "error", "info"] as const;
+export type NotificationType = typeof notificationTypes[number];
 
 // ============ EXISTING TYPES (Non-database) ============
 

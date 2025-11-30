@@ -14,6 +14,7 @@ import { TradeCycleControls } from "@/components/TradeCycleControls";
 import { AIChatbot } from "@/components/AIChatbot";
 import { AlgorithmStatus } from "@/components/AlgorithmStatus";
 import { RiskParametersCard } from "@/components/RiskParametersCard";
+import { NotificationPanel } from "@/components/NotificationPanel";
 import { useTradingContext } from "@/lib/tradingContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useQuery } from "@tanstack/react-query";
@@ -100,6 +101,7 @@ export default function Dashboard() {
               Analytics
             </Button>
           </Link>
+          <NotificationPanel />
           <ConnectionStatus />
           <ThemeToggle />
         </div>

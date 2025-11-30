@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { exchangeService, createTickerStream } from "./exchangeService";
 import { analyzeAndRespond } from "./openai";
 import { tradingBot } from "./tradingBot";
+import { notificationService } from "./notificationService";
 import { apiCredentialsSchema, manualOrderSchema, riskParametersSchema, insertTradeSchema } from "@shared/schema";
 import type { Exchange, TradeCycleState, StopOrder } from "@shared/schema";
 import { z } from "zod";
@@ -15,7 +16,7 @@ const updateTradeSchema = z.object({
   pnl: z.number().optional(),
   pnlPercent: z.number().optional(),
   status: z.enum(["open", "closed", "liquidated"]).optional(),
-  closedAt: z.string().datetime().optional(),
+  closedAt: z.string().datetime().transform(s => new Date(s)).optional(),
   closeReason: z.string().optional(),
 });
 
@@ -29,6 +30,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   wss.on("connection", (ws) => {
     clients.add(ws);
+    notificationService.registerClient(ws);
     console.log("WebSocket client connected");
 
     ws.on("message", async (message) => {
@@ -73,6 +75,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     ws.on("close", () => {
       clients.delete(ws);
+      notificationService.unregisterClient(ws);
       console.log("WebSocket client disconnected");
     });
   });
@@ -606,6 +609,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await storage.deleteAbTest(parseInt(req.params.id));
       res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // ============ NOTIFICATIONS ROUTES ============
+
+  // Get all notifications
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const notifications = await storage.getNotifications(limit);
+      res.json({ success: true, notifications });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get unread notifications count
+  app.get("/api/notifications/unread", async (req, res) => {
+    try {
+      const notifications = await storage.getUnreadNotifications();
+      res.json({ success: true, notifications, count: notifications.length });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Mark a notification as read
+  app.patch("/api/notifications/:id/read", async (req, res) => {
+    try {
+      await storage.markNotificationRead(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Mark all notifications as read
+  app.post("/api/notifications/mark-all-read", async (req, res) => {
+    try {
+      await storage.markAllNotificationsRead();
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Delete a notification
+  app.delete("/api/notifications/:id", async (req, res) => {
+    try {
+      await storage.deleteNotification(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Clear all notifications
+  app.delete("/api/notifications", async (req, res) => {
+    try {
+      await storage.clearNotifications();
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get notification settings
+  app.get("/api/notifications/settings", async (req, res) => {
+    try {
+      const settings = await storage.getNotificationSettings();
+      res.json({ success: true, settings });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Update notification settings
+  app.put("/api/notifications/settings", async (req, res) => {
+    try {
+      const settings = await storage.saveNotificationSettings(req.body);
+      notificationService.invalidateSettings();
+      res.json({ success: true, settings });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }

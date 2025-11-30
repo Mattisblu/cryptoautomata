@@ -4,18 +4,18 @@
 A professional AI-powered cryptocurrency futures trading application with automated trading algorithms, real-time market data, and intelligent trade execution for Coinstore and BYDFI exchanges.
 
 ## Current State
-- **Phase**: Phase 4 - Strategy Versioning & A/B Testing
+- **Phase**: Phase 5 - Notifications & Alerts
 - **Last Updated**: November 2024
 
 ## Recent Changes
-- Added Strategy Management page (/strategies) with algorithm version history and A/B testing
-- Algorithm versioning: save snapshots, view history, restore previous versions
-- A/B testing: compare two strategies side-by-side with PnL tracking
-- New API routes for algorithm versions and A/B test management
-- Database tables: algorithmVersions, abTests (in addition to existing tables)
-- Navigation: Added Strategies link in Dashboard header
-- Previous: Market-specific leverage limits, Analytics Dashboard, trade history persistence
-- Previous features: BYDFI support, Paper/Real toggle, Risk Management with SL/TP/Trailing stops
+- Added Notification System with real-time alerts for trading events
+- NotificationPanel component in Dashboard header with bell icon and unread badge
+- Notification types: trade_open, trade_close, stop_loss, take_profit, trailing_stop, error, info
+- Configurable notification settings: toggle by type, browser notifications, sound alerts
+- Trading bot integration: sends notifications on position open/close, SL/TP/trailing triggers
+- Database tables: notifications, notification_settings
+- Previous: Strategy Management page, Algorithm versioning, A/B testing
+- Previous features: BYDFI support, Paper/Real toggle, Risk Management, Analytics Dashboard
 
 ## Architecture
 
@@ -45,6 +45,7 @@ client/
 │   │   ├── OrdersTable.tsx
 │   │   ├── RiskParametersCard.tsx
 │   │   ├── TradeCycleControls.tsx
+│   │   ├── NotificationPanel.tsx  # Alerts dropdown with settings
 │   │   └── ...
 │   ├── hooks/
 │   │   └── useWebSocket.ts
@@ -60,7 +61,8 @@ server/
 ├── storage.ts         # Data persistence (in-memory + database)
 ├── openai.ts          # AI integration
 ├── exchangeService.ts # Exchange API simulation (Coinstore + BYDFI)
-└── tradingBot.ts      # Automated trading logic with trade recording
+├── tradingBot.ts      # Automated trading logic with trade recording
+└── notificationService.ts  # Real-time notification dispatch
 shared/
 └── schema.ts          # Type definitions + Drizzle table schemas
 ```
@@ -135,6 +137,13 @@ shared/
 - `POST /api/ab-tests/:id/complete` - Complete an A/B test and determine winner
 - `PATCH /api/ab-tests/:id/results` - Update test results (PnL, trades, win rate)
 - `DELETE /api/ab-tests/:id` - Delete an A/B test
+
+### Notifications
+- `GET /api/notifications` - Get all notifications
+- `PATCH /api/notifications/:id/read` - Mark notification as read
+- `POST /api/notifications/mark-all-read` - Mark all notifications as read
+- `GET /api/notifications/settings` - Get notification settings
+- `PUT /api/notifications/settings` - Update notification settings
 
 ### Trade Cycle
 - `POST /api/trading/start` - Start trading cycle (includes executionMode: "paper" | "real")

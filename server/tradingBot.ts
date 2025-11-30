@@ -1,6 +1,7 @@
 import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange, ExecutionMode, StopOrder, RiskManagement, InsertTrade } from "@shared/schema";
 import { storage } from "./storage";
 import { exchangeService } from "./exchangeService";
+import { notificationService } from "./notificationService";
 import { randomUUID } from "crypto";
 
 // Map position IDs to trade IDs for updating when positions close
@@ -335,6 +336,33 @@ class TradingBot {
           // Update trade record in database
           await this.updateTradeOnClose(position, currentPrice, stopOrder.type);
 
+          // Send notification for stop order trigger
+          if (stopOrder.type === "stop_loss") {
+            await notificationService.notifyStopLoss(
+              exchange,
+              position.symbol,
+              position.side,
+              position.unrealizedPnl,
+              this.state.executionMode
+            );
+          } else if (stopOrder.type === "take_profit") {
+            await notificationService.notifyTakeProfit(
+              exchange,
+              position.symbol,
+              position.side,
+              position.unrealizedPnl,
+              this.state.executionMode
+            );
+          } else if (stopOrder.type === "trailing_stop") {
+            await notificationService.notifyTrailingStop(
+              exchange,
+              position.symbol,
+              position.side,
+              position.unrealizedPnl,
+              this.state.executionMode
+            );
+          }
+
           this.state.successfulTrades++;
         }
       }
@@ -617,6 +645,16 @@ class TradingBot {
           } catch (err) {
             console.error("Failed to save trade to database:", err);
           }
+
+          // Send notification for position open
+          await notificationService.notifyTradeOpen(
+            exchange,
+            symbol,
+            position.side,
+            position.quantity,
+            position.entryPrice,
+            executionMode
+          );
         }
       } else if (decision.action === "close") {
         const positions = await storage.getPositions(exchange);
@@ -642,6 +680,16 @@ class TradingBot {
 
           // Update trade record in database
           await this.updateTradeOnClose(position, ticker.lastPrice, "algorithm");
+
+          // Send notification for position close
+          await notificationService.notifyTradeClose(
+            exchange,
+            symbol,
+            position.side,
+            position.unrealizedPnl,
+            "algorithm",
+            executionMode
+          );
         }
       }
     } catch (error) {
@@ -649,6 +697,12 @@ class TradingBot {
         type: "error",
         message: `[${modeLabel}] Failed to execute ${decision.action}: ${(error as Error).message}`,
       });
+
+      // Send error notification
+      await notificationService.notifyError(
+        `Failed to execute ${decision.action}: ${(error as Error).message}`,
+        { exchange, symbol }
+      );
     }
   }
 
