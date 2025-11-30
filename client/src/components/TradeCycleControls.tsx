@@ -177,7 +177,10 @@ export function TradeCycleControls() {
     },
   });
 
-  const canStart = isAuthenticated && selectedMarket && !isRunning && !isPaused && !isStopping;
+  // Manual mode doesn't require an algorithm, AI modes do
+  const requiresAlgorithm = tradingMode !== "manual";
+  const hasRequiredAlgorithm = !requiresAlgorithm || Boolean(activeAlgorithm);
+  const canStart = isAuthenticated && selectedMarket && !isRunning && !isPaused && !isStopping && hasRequiredAlgorithm;
   const canPause = isRunning;
   const canResume = isPaused;
   const canStop = isRunning || isPaused;
@@ -356,10 +359,15 @@ export function TradeCycleControls() {
                       <li className={selectedMarket ? "text-profit" : ""}>
                         {selectedMarket ? "✓" : "2."} Select a market
                       </li>
-                      <li className={activeAlgorithm ? "text-profit" : ""}>
-                        {activeAlgorithm ? "✓" : "3."} Load an algorithm (ask AI to generate one)
-                      </li>
+                      {requiresAlgorithm && (
+                        <li className={activeAlgorithm ? "text-profit" : ""}>
+                          {activeAlgorithm ? "✓" : "3."} Generate & load a strategy (use the AI chatbot)
+                        </li>
+                      )}
                     </ul>
+                    {!requiresAlgorithm && (
+                      <p className="text-xs text-muted-foreground mt-1">Manual mode - no algorithm needed</p>
+                    )}
                   </TooltipContent>
                 )}
               </Tooltip>

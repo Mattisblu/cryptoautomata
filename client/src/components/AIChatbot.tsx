@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Copy, Check, Loader2, Code, Sparkles, Trash2 } from "lucide-react";
+import { Send, Bot, User, Copy, Check, Loader2, Code, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -254,32 +254,41 @@ export function AIChatbot() {
           {chatMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center py-8">
               <Bot className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-sm text-muted-foreground mb-2">
-                Ask me to analyze market data or generate trading strategies
+              <p className="text-sm text-muted-foreground mb-4">
+                {tradingMode === "manual" 
+                  ? "You're in Manual mode. Switch to AI Trading or AI Scalping to use automated strategies."
+                  : `Ready to generate a ${tradingMode === "ai-scalping" ? "scalping" : "trading"} strategy for ${selectedMarket?.symbol || "your selected market"}`
+                }
               </p>
-              <div className="flex flex-wrap gap-2 justify-center max-w-sm">
-                <Badge 
-                  variant="outline" 
-                  className="cursor-pointer hover-elevate"
-                  onClick={() => setInput("Analyze the current market trend")}
+              {tradingMode !== "manual" && (
+                <Button
+                  onClick={() => {
+                    const prompt = tradingMode === "ai-scalping"
+                      ? "Analyze the current market conditions and generate an optimized scalping strategy with quick entry/exit rules, tight stop-losses, and small profit targets suitable for high-frequency trading."
+                      : "Analyze the current market conditions and generate a comprehensive AI trading strategy with entry/exit rules, stop-loss levels, take-profit targets, and position sizing based on the current trend and indicators.";
+                    addChatMessage({
+                      role: "user",
+                      content: prompt,
+                    });
+                    sendMessageMutation.mutate(prompt);
+                  }}
+                  disabled={!selectedMarket || sendMessageMutation.isPending}
+                  className="gap-2"
+                  data-testid="button-generate-strategy"
                 >
-                  Analyze market trend
-                </Badge>
-                <Badge 
-                  variant="outline" 
-                  className="cursor-pointer hover-elevate"
-                  onClick={() => setInput("Generate a scalping strategy for the current conditions")}
-                >
-                  Generate scalping strategy
-                </Badge>
-                <Badge 
-                  variant="outline" 
-                  className="cursor-pointer hover-elevate"
-                  onClick={() => setInput("What are the key support and resistance levels?")}
-                >
-                  Support/resistance levels
-                </Badge>
-              </div>
+                  {sendMessageMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="h-4 w-4" />
+                  )}
+                  Generate {tradingMode === "ai-scalping" ? "Scalping" : "AI Trading"} Strategy
+                </Button>
+              )}
+              {tradingMode === "manual" && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  In Manual mode, you control all trades directly without AI automation.
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-4 py-4">
