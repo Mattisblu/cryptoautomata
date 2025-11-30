@@ -25,9 +25,15 @@ export function AlgorithmStatus() {
         <CardContent className="py-4">
           <div className="flex items-center gap-3 text-muted-foreground">
             <Code className="h-5 w-5" />
-            <div>
+            <div className="flex-1">
               <p className="text-sm font-medium">No Algorithm Loaded</p>
-              <p className="text-xs">Ask the AI to generate a trading strategy</p>
+              <p className="text-xs mt-1">
+                Use the AI chatbot below to generate a trading strategy. 
+                Try: "Generate a trading algorithm for BTCUSDT with 2% stop loss"
+              </p>
+              <p className="text-xs mt-2 text-profit">
+                Then click "Load Algorithm" on the AI's response to activate it.
+              </p>
             </div>
           </div>
         </CardContent>

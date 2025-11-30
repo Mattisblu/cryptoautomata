@@ -328,19 +328,41 @@ export function TradeCycleControls() {
           {/* Control Buttons */}
           <div className="flex items-center gap-2">
             {!isRunning && !isPaused && (
-              <Button
-                onClick={() => startTradingMutation.mutate()}
-                disabled={!canStart || startTradingMutation.isPending}
-                className="bg-profit hover:bg-profit/90 text-white"
-                data-testid="button-start-trading"
-              >
-                {startTradingMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Play className="h-4 w-4 mr-2" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      onClick={() => startTradingMutation.mutate()}
+                      disabled={!canStart || startTradingMutation.isPending}
+                      className="bg-profit hover:bg-profit/90 text-white"
+                      data-testid="button-start-trading"
+                    >
+                      {startTradingMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Play className="h-4 w-4 mr-2" />
+                      )}
+                      Start Trading
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!canStart && (
+                  <TooltipContent side="bottom" className="max-w-[280px]">
+                    <p className="font-medium mb-1">To start trading:</p>
+                    <ul className="text-xs space-y-1 text-muted-foreground">
+                      <li className={isAuthenticated ? "text-profit" : ""}>
+                        {isAuthenticated ? "✓" : "1."} Connect to exchange
+                      </li>
+                      <li className={selectedMarket ? "text-profit" : ""}>
+                        {selectedMarket ? "✓" : "2."} Select a market
+                      </li>
+                      <li className={activeAlgorithm ? "text-profit" : ""}>
+                        {activeAlgorithm ? "✓" : "3."} Load an algorithm (ask AI to generate one)
+                      </li>
+                    </ul>
+                  </TooltipContent>
                 )}
-                Start Trading
-              </Button>
+              </Tooltip>
             )}
 
             {isRunning && (
