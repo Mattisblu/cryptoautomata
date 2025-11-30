@@ -8,12 +8,15 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: November 2024
 
 ## Recent Changes
-- Added Notification System with real-time alerts for trading events
+- Improved AI Chatbot UX: Single "Generate Strategy" button that adapts to trading mode
+  - AI Trading mode: Shows "Generate AI Trading Strategy" 
+  - AI Scalping mode: Shows "Generate Scalping Strategy"
+  - Manual mode: No button, shows explanatory text
+- Enhanced Start Trading validation: Button requires loaded algorithm for AI modes
+  - Manual mode allows starting without an algorithm
+  - Tooltip shows checklist of requirements (exchange, market, algorithm)
+- Notification System: Real-time alerts for trading events
 - NotificationPanel component in Dashboard header with bell icon and unread badge
-- Notification types: trade_open, trade_close, stop_loss, take_profit, trailing_stop, error, info
-- Configurable notification settings: toggle by type, browser notifications, sound alerts
-- Trading bot integration: sends notifications on position open/close, SL/TP/trailing triggers
-- Database tables: notifications, notification_settings
 - Previous: Strategy Management page, Algorithm versioning, A/B testing
 - Previous features: BYDFI support, Paper/Real toggle, Risk Management, Analytics Dashboard
 
