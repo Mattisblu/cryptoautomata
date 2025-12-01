@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import pLimit from "p-limit";
-import pRetry from "p-retry";
+import pRetry, { AbortError } from "p-retry";
 import type { TradingAlgorithm, TradingMode, ExecutionMode, Ticker, Kline, Position, TradingRule, RiskManagement, RiskParameters } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -118,7 +118,7 @@ export async function analyzeAndRespond(
       pRetry(
         async () => {
           const completion = await openai.chat.completions.create({
-            model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025
+            model: "gpt-4o", // Using gpt-4o for more reliable responses
             messages: [
               { role: "system", content: SYSTEM_PROMPT },
               {
@@ -143,12 +143,12 @@ export async function analyzeAndRespond(
           minTimeout: 1000,
           maxTimeout: 30000,
           factor: 2,
-          onFailedAttempt: (error) => {
-            console.warn(`AI attempt failed: ${error.message}`);
+          onFailedAttempt: (attemptInfo) => {
+            const errorMessage = attemptInfo.error?.message || String(attemptInfo.error);
+            console.warn(`AI attempt failed: ${errorMessage}`);
             // Only abort for non-retryable errors (not rate limits or empty responses)
-            const message = error.message || String(error);
-            if (!isRateLimitError(error) && !message.includes("Empty response")) {
-              throw new pRetry.AbortError(error);
+            if (!isRateLimitError(attemptInfo.error) && !errorMessage.includes("Empty response")) {
+              throw new AbortError(attemptInfo.error?.message || "Unknown error");
             }
           },
         }
@@ -340,7 +340,7 @@ Provide a quick market sentiment (bullish/bearish/neutral) and key level to watc
     pRetry(
       async () => {
         const completion = await openai.chat.completions.create({
-          model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025
+          model: "gpt-4o", // Using gpt-4o for more reliable responses
           messages: [
             {
               role: "system",
@@ -357,9 +357,9 @@ Provide a quick market sentiment (bullish/bearish/neutral) and key level to watc
         minTimeout: 1000,
         maxTimeout: 16000,
         factor: 2,
-        onFailedAttempt: (error) => {
-          if (!isRateLimitError(error)) {
-            throw new pRetry.AbortError(error);
+        onFailedAttempt: (attemptInfo) => {
+          if (!isRateLimitError(attemptInfo.error)) {
+            throw new AbortError(attemptInfo.error?.message || "Unknown error");
           }
         },
       }

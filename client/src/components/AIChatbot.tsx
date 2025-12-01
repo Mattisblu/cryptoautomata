@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Copy, Check, Loader2, Code, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { Send, Bot, User, Copy, Check, Loader2, Code, Sparkles, Trash2, Wand2, Brain, TrendingUp, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { ChatMessage, TradingAlgorithm } from "@shared/schema";
+import type { ChatMessage, TradingAlgorithm, OptimizationSuggestion } from "@shared/schema";
 
 function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString("en-US", {
@@ -83,6 +83,94 @@ function AlgorithmDisplay({ algorithm, onLoad }: { algorithm: TradingAlgorithm; 
   );
 }
 
+function OptimizationSuggestionCard({ 
+  suggestion, 
+  onApprove, 
+  onReject 
+}: { 
+  suggestion: OptimizationSuggestion; 
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const isPending = suggestion.status === "pending";
+  const isAutoApplied = suggestion.status === "auto-applied";
+
+  return (
+    <div className={cn(
+      "border rounded-md p-3 mb-3",
+      isPending ? "border-primary/50 bg-primary/5" : 
+      isAutoApplied ? "border-profit/50 bg-profit/5" :
+      suggestion.status === "approved" ? "border-profit/30 bg-profit/5" :
+      "border-muted bg-muted/30"
+    )}>
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0 w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">
+          <Brain className="h-4 w-4 text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium">Strategy Optimization</span>
+            <Badge variant={
+              isPending ? "default" : 
+              isAutoApplied ? "secondary" :
+              suggestion.status === "approved" ? "secondary" : "outline"
+            } className="text-[10px]">
+              {isPending ? "Pending Review" : 
+               isAutoApplied ? "Auto-Applied" :
+               suggestion.status === "approved" ? "Approved" : "Rejected"}
+            </Badge>
+            <Badge variant="outline" className="text-[10px] gap-1">
+              <TrendingUp className="h-2.5 w-2.5" />
+              {suggestion.performanceContext.winRate.toFixed(1)}% Win
+            </Badge>
+          </div>
+          
+          <p className="text-xs text-muted-foreground mb-2 line-clamp-3">
+            {suggestion.reason}
+          </p>
+          
+          {/* Performance context */}
+          <div className="flex items-center gap-3 text-[10px] text-muted-foreground mb-2">
+            <span>PnL: ${suggestion.performanceContext.totalPnl.toFixed(2)}</span>
+            <span>Trades: {suggestion.performanceContext.recentTrades}</span>
+            {suggestion.performanceContext.drawdown > 0 && (
+              <span className="text-loss flex items-center gap-1">
+                <AlertTriangle className="h-2.5 w-2.5" />
+                DD: ${suggestion.performanceContext.drawdown.toFixed(2)}
+              </span>
+            )}
+          </div>
+
+          {/* Actions for pending suggestions */}
+          {isPending && (
+            <div className="flex items-center gap-2">
+              <Button 
+                size="sm" 
+                onClick={onApprove}
+                className="h-7 text-xs gap-1"
+                data-testid={`button-approve-suggestion-${suggestion.id}`}
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                Apply Changes
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={onReject}
+                className="h-7 text-xs gap-1"
+                data-testid={`button-reject-suggestion-${suggestion.id}`}
+              >
+                <XCircle className="h-3 w-3" />
+                Dismiss
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChatMessageBubble({ message, onLoadAlgorithm }: { message: ChatMessage; onLoadAlgorithm: () => void }) {
   const isUser = message.role === "user";
 
@@ -141,9 +229,14 @@ export function AIChatbot() {
     positions,
     tradingMode,
     activeAlgorithm,
+    setActiveAlgorithm,
     timeframe,
     riskParameters,
     executionMode,
+    optimizationSuggestions,
+    updateOptimizationSuggestion,
+    tradeCycleState,
+    liveMetrics,
   } = useTradingContext();
   const [input, setInput] = useState("");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -210,6 +303,28 @@ export function AIChatbot() {
       description: "The trading algorithm has been loaded and is ready for execution.",
     });
   };
+
+  const handleApproveSuggestion = (suggestion: OptimizationSuggestion) => {
+    if (suggestion.suggestedAlgorithm) {
+      setActiveAlgorithm(suggestion.suggestedAlgorithm);
+      toast({
+        title: "Strategy Updated",
+        description: "The optimized strategy has been applied.",
+      });
+    }
+    updateOptimizationSuggestion(suggestion.id, "approved");
+  };
+
+  const handleRejectSuggestion = (suggestion: OptimizationSuggestion) => {
+    updateOptimizationSuggestion(suggestion.id, "rejected");
+    toast({
+      title: "Suggestion Dismissed",
+      description: "The optimization suggestion has been dismissed.",
+    });
+  };
+
+  const pendingSuggestions = optimizationSuggestions.filter(s => s.status === "pending");
+  const isTrading = tradeCycleState.status === "running" || tradeCycleState.status === "paused";
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -292,6 +407,47 @@ export function AIChatbot() {
             </div>
           ) : (
             <div className="space-y-4 py-4">
+              {/* Live Metrics Display during trading */}
+              {isTrading && liveMetrics && (
+                <div className="border rounded-md p-3 mb-3 bg-muted/30">
+                  <div className="flex items-center gap-2 mb-2">
+                    <TrendingUp className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Live Performance</span>
+                    <Badge variant="outline" className="text-[10px] ml-auto">
+                      {tradeCycleState.optimizationMode} mode
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-[11px]">
+                    <div>
+                      <span className="text-muted-foreground">Win Rate:</span>
+                      <span className={cn("ml-1 font-medium", liveMetrics.winRate >= 50 ? "text-profit" : "text-loss")}>
+                        {liveMetrics.winRate.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">PnL:</span>
+                      <span className={cn("ml-1 font-medium", liveMetrics.totalPnl >= 0 ? "text-profit" : "text-loss")}>
+                        ${liveMetrics.totalPnl.toFixed(2)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Trades:</span>
+                      <span className="ml-1 font-medium">{liveMetrics.totalTrades}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Pending Optimization Suggestions */}
+              {pendingSuggestions.map((suggestion) => (
+                <OptimizationSuggestionCard
+                  key={suggestion.id}
+                  suggestion={suggestion}
+                  onApprove={() => handleApproveSuggestion(suggestion)}
+                  onReject={() => handleRejectSuggestion(suggestion)}
+                />
+              ))}
+              
               {chatMessages.map((message) => (
                 <ChatMessageBubble 
                   key={message.id} 

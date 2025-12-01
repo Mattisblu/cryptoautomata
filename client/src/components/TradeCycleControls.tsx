@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Pause, Square, AlertTriangle, Loader2, Clock, FlaskConical, Zap } from "lucide-react";
+import { Play, Pause, Square, AlertTriangle, Loader2, Clock, FlaskConical, Zap, Brain, Settings2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,6 +21,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { OptimizationMode } from "@shared/schema";
 import { useTradingContext } from "@/lib/tradingContext";
 import { cn } from "@/lib/utils";
 import { useMutation } from "@tanstack/react-query";
@@ -51,6 +59,8 @@ export function TradeCycleControls() {
     tradingMode,
     executionMode,
     setExecutionMode,
+    optimizationMode,
+    setOptimizationMode,
     positions,
     activeAlgorithm,
   } = useTradingContext();
@@ -69,6 +79,7 @@ export function TradeCycleControls() {
       return apiRequest("POST", "/api/trading/start", {
         mode: tradingMode,
         executionMode,
+        optimizationMode,
         symbol: selectedMarket?.symbol,
         algorithmId: activeAlgorithm?.id,
       });
@@ -79,6 +90,7 @@ export function TradeCycleControls() {
         status: "running",
         mode: tradingMode,
         executionMode,
+        optimizationMode,
         symbol: selectedMarket?.symbol || "",
         startedAt: Date.now(),
         algorithmId: activeAlgorithm?.id,
@@ -140,6 +152,7 @@ export function TradeCycleControls() {
         status: "idle",
         mode: tradingMode,
         executionMode,
+        optimizationMode,
         exchange: tradeCycleState.exchange,
         symbol: "",
       });
@@ -159,6 +172,7 @@ export function TradeCycleControls() {
         status: "idle",
         mode: tradingMode,
         executionMode,
+        optimizationMode,
         exchange: tradeCycleState.exchange,
         symbol: "",
       });
@@ -326,6 +340,91 @@ export function TradeCycleControls() {
                 )}
               </TooltipContent>
             </Tooltip>
+
+            {/* Strategy Optimization Mode Selector */}
+            {tradingMode !== "manual" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-md border transition-colors",
+                    !canSwitchMode && "opacity-50",
+                    "border-muted bg-muted/30"
+                  )}>
+                    <Brain className="h-4 w-4 text-primary" />
+                    <Select
+                      value={optimizationMode}
+                      onValueChange={(value: OptimizationMode) => {
+                        if (canSwitchMode) {
+                          setOptimizationMode(value);
+                          const labels: Record<OptimizationMode, string> = {
+                            "manual": "Manual Review",
+                            "semi-auto": "Semi-Auto",
+                            "full-auto": "Full Auto"
+                          };
+                          const descriptions: Record<OptimizationMode, string> = {
+                            "manual": "AI will suggest changes for you to approve",
+                            "semi-auto": "AI will auto-adjust parameters, but you approve major changes",
+                            "full-auto": "AI can fully modify the strategy automatically"
+                          };
+                          toast({
+                            title: `Strategy Optimization: ${labels[value]}`,
+                            description: descriptions[value],
+                          });
+                        }
+                      }}
+                      disabled={!canSwitchMode}
+                    >
+                      <SelectTrigger 
+                        className="w-[140px] h-8 text-sm border-0 bg-transparent"
+                        data-testid="select-optimization-mode"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">
+                          <div className="flex items-center gap-2">
+                            <Settings2 className="h-3.5 w-3.5" />
+                            <span>Manual Review</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="semi-auto">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-3.5 w-3.5" />
+                            <span>Semi-Auto</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="full-auto">
+                          <div className="flex items-center gap-2">
+                            <Brain className="h-3.5 w-3.5" />
+                            <span>Full Auto</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-[280px]">
+                  <p className="font-medium mb-1">Live Strategy Optimization</p>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    How the AI adapts your strategy during trading:
+                  </p>
+                  <ul className="text-xs space-y-1.5">
+                    <li className={optimizationMode === "manual" ? "text-primary" : "text-muted-foreground"}>
+                      <span className="font-medium">Manual:</span> AI suggests, you approve
+                    </li>
+                    <li className={optimizationMode === "semi-auto" ? "text-primary" : "text-muted-foreground"}>
+                      <span className="font-medium">Semi-Auto:</span> AI adjusts parameters, you approve big changes
+                    </li>
+                    <li className={optimizationMode === "full-auto" ? "text-primary" : "text-muted-foreground"}>
+                      <span className="font-medium">Full Auto:</span> AI can rewrite strategy entirely
+                    </li>
+                  </ul>
+                  {!canSwitchMode && (
+                    <p className="text-muted-foreground mt-2 text-xs">Stop trading to change mode.</p>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
 
           {/* Control Buttons */}

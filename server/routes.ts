@@ -702,7 +702,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/trading/start", async (req, res) => {
     try {
-      const { mode, executionMode, symbol, algorithmId, exchange } = req.body;
+      const { mode, executionMode, optimizationMode, symbol, algorithmId, exchange } = req.body;
 
       if (!symbol) {
         return res.status(400).json({ success: false, error: "Symbol required" });
@@ -710,6 +710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const exchangeName = (exchange || "coinstore") as Exchange;
       const execMode = (executionMode || "paper") as "paper" | "real";
+      const optMode = (optimizationMode || "manual") as "manual" | "semi-auto" | "full-auto";
       const credentials = await storage.getCredentials(exchangeName);
       
       if (!credentials) {
@@ -736,7 +737,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           symbol,
           algorithm,
           executionMode: execMode,
+          optimizationMode: optMode,
           checkIntervalMs: mode === "ai-scalping" ? 2000 : 5000,
+          onOptimizationSuggestion: (suggestion) => {
+            broadcast("optimizationSuggestion", suggestion);
+          },
+          onMetricsUpdate: (metrics) => {
+            broadcast("liveMetrics", metrics);
+          },
+          onAlgorithmUpdate: (algo) => {
+            broadcast("algorithmUpdate", algo);
+          },
         });
       }
 
@@ -744,6 +755,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "running",
         mode,
         executionMode: execMode,
+        optimizationMode: optMode,
         exchange: exchangeName,
         symbol,
         startedAt: Date.now(),
@@ -818,6 +830,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "idle",
         mode: currentState?.mode || "ai-trading",
         executionMode: currentState?.executionMode || "paper",
+        optimizationMode: currentState?.optimizationMode || "manual",
         exchange: exchange as Exchange,
         symbol: "",
       };
@@ -842,6 +855,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "idle",
         mode: currentState?.mode || "ai-trading",
         executionMode: currentState?.executionMode || "paper",
+        optimizationMode: currentState?.optimizationMode || "manual",
         exchange: exchange as Exchange,
         symbol: "",
       };
@@ -863,6 +877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "idle",
         mode: "ai-trading",
         executionMode: "paper",
+        optimizationMode: "manual",
         exchange: "coinstore",
         symbol: "",
       };

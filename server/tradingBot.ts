@@ -1,7 +1,8 @@
-import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange, ExecutionMode, StopOrder, RiskManagement, InsertTrade } from "@shared/schema";
+import type { TradingAlgorithm, TradingRule, Position, Order, Ticker, Kline, Exchange, ExecutionMode, OptimizationMode, StopOrder, RiskManagement, InsertTrade, OptimizationSuggestion, LiveStrategyMetrics } from "@shared/schema";
 import { storage } from "./storage";
 import { exchangeService } from "./exchangeService";
 import { notificationService } from "./notificationService";
+import { strategyOptimizer } from "./strategyOptimizer";
 import { randomUUID } from "crypto";
 
 // Map position IDs to trade IDs for updating when positions close
@@ -12,7 +13,11 @@ interface TradingBotConfig {
   symbol: string;
   algorithm: TradingAlgorithm;
   executionMode: ExecutionMode;
+  optimizationMode: OptimizationMode;
   checkIntervalMs?: number;
+  onOptimizationSuggestion?: (suggestion: Omit<OptimizationSuggestion, "id" | "timestamp">) => void;
+  onMetricsUpdate?: (metrics: LiveStrategyMetrics) => void;
+  onAlgorithmUpdate?: (algorithm: TradingAlgorithm) => void;
 }
 
 interface TradingBotState {
@@ -83,6 +88,41 @@ class TradingBot {
       () => this.executeTradeCheck(),
       interval
     );
+
+    // Start strategy optimizer for all AI trading modes
+    // The optimizer monitors performance and generates suggestions regardless of optimization mode
+    // In "manual" optimization mode: suggestions require user approval before applying
+    // In "semi-auto" mode: parameter adjustments are auto-applied
+    // In "full-auto" mode: full strategy rewrites are auto-applied
+    if (config.algorithm.mode !== "manual") {
+      await strategyOptimizer.start({
+        exchange: config.exchange,
+        symbol: config.symbol,
+        algorithm: config.algorithm,
+        optimizationMode: config.optimizationMode,
+        onSuggestion: config.onOptimizationSuggestion || (() => {}),
+        onMetricsUpdate: config.onMetricsUpdate || (() => {}),
+        onAlgorithmUpdate: (algo) => {
+          this.updateAlgorithm(algo);
+          if (config.onAlgorithmUpdate) {
+            config.onAlgorithmUpdate(algo);
+          }
+        },
+      });
+    }
+  }
+
+  // Update the running algorithm (for optimization)
+  updateAlgorithm(algorithm: TradingAlgorithm): void {
+    if (this.config) {
+      this.config.algorithm = algorithm;
+      const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+      storage.addTradeLog({
+        type: "algorithm",
+        message: `[${modeLabel}] Algorithm updated: ${algorithm.name} v${algorithm.version}`,
+        data: { algorithmId: algorithm.id, version: algorithm.version },
+      });
+    }
   }
 
   async pause(): Promise<void> {
@@ -117,6 +157,11 @@ class TradingBot {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
+    }
+
+    // Stop strategy optimizer
+    if (strategyOptimizer.isActive()) {
+      await strategyOptimizer.stop();
     }
 
     const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
@@ -766,6 +811,11 @@ class TradingBot {
           closedAt: new Date(),
           closeReason,
         });
+
+        // Notify strategy optimizer about the trade result
+        if (strategyOptimizer.isActive()) {
+          strategyOptimizer.recordTrade(pnl, pnl > 0);
+        }
 
         positionToTradeId.delete(position.id);
       }

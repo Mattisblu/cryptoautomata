@@ -4,6 +4,7 @@ import type {
   Market,
   TradingMode,
   ExecutionMode,
+  OptimizationMode,
   Ticker,
   Kline,
   Position,
@@ -14,6 +15,8 @@ import type {
   ConnectionState,
   ApiCredentials,
   RiskParameters,
+  OptimizationSuggestion,
+  LiveStrategyMetrics,
 } from "@shared/schema";
 
 interface TradingContextValue {
@@ -32,6 +35,20 @@ interface TradingContextValue {
   // Execution mode (Paper vs Real)
   executionMode: ExecutionMode;
   setExecutionMode: (mode: ExecutionMode) => void;
+  
+  // Optimization mode for live strategy adjustments
+  optimizationMode: OptimizationMode;
+  setOptimizationMode: (mode: OptimizationMode) => void;
+  
+  // Optimization suggestions from AI
+  optimizationSuggestions: OptimizationSuggestion[];
+  addOptimizationSuggestion: (suggestion: Omit<OptimizationSuggestion, "id" | "timestamp">) => void;
+  updateOptimizationSuggestion: (id: string, status: OptimizationSuggestion["status"]) => void;
+  clearOptimizationSuggestions: () => void;
+  
+  // Live strategy metrics
+  liveMetrics: LiveStrategyMetrics | null;
+  setLiveMetrics: (metrics: LiveStrategyMetrics | null) => void;
   
   // Chart timeframe
   timeframe: string;
@@ -92,6 +109,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   // Execution mode (Paper vs Real trading)
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("paper");
   
+  // Optimization mode for live strategy adjustments
+  const [optimizationMode, setOptimizationMode] = useState<OptimizationMode>("manual");
+  
+  // Optimization suggestions from AI
+  const [optimizationSuggestions, setOptimizationSuggestions] = useState<OptimizationSuggestion[]>([]);
+  
+  // Live strategy metrics
+  const [liveMetrics, setLiveMetrics] = useState<LiveStrategyMetrics | null>(null);
+  
   // Chart timeframe
   const [timeframe, setTimeframe] = useState<string>("15m");
   
@@ -127,6 +153,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     status: "idle",
     mode: "ai-trading",
     executionMode: "paper",
+    optimizationMode: "manual",
     exchange: "coinstore",
     symbol: "",
   });
@@ -154,6 +181,25 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   
   const clearChatMessages = useCallback(() => {
     setChatMessages([]);
+  }, []);
+  
+  const addOptimizationSuggestion = useCallback((suggestion: Omit<OptimizationSuggestion, "id" | "timestamp">) => {
+    const newSuggestion: OptimizationSuggestion = {
+      ...suggestion,
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+    };
+    setOptimizationSuggestions(prev => [...prev, newSuggestion]);
+  }, []);
+  
+  const updateOptimizationSuggestion = useCallback((id: string, status: OptimizationSuggestion["status"]) => {
+    setOptimizationSuggestions(prev => 
+      prev.map(s => s.id === id ? { ...s, status } : s)
+    );
+  }, []);
+  
+  const clearOptimizationSuggestions = useCallback(() => {
+    setOptimizationSuggestions([]);
   }, []);
   
   const toggleTheme = useCallback(() => {
@@ -189,6 +235,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         setTradingMode,
         executionMode,
         setExecutionMode,
+        optimizationMode,
+        setOptimizationMode,
+        optimizationSuggestions,
+        addOptimizationSuggestion,
+        updateOptimizationSuggestion,
+        clearOptimizationSuggestions,
+        liveMetrics,
+        setLiveMetrics,
         timeframe,
         setTimeframe,
         riskParameters,
