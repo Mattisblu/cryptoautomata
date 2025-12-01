@@ -375,10 +375,48 @@ export type TradeCycleStatus = typeof tradeCycleStatuses[number];
 export const executionModes = ["paper", "real"] as const;
 export type ExecutionMode = typeof executionModes[number];
 
+// Strategy optimization modes for live trading
+export const optimizationModes = ["manual", "semi-auto", "full-auto"] as const;
+export type OptimizationMode = typeof optimizationModes[number];
+
+// Optimization suggestion from AI
+export interface OptimizationSuggestion {
+  id: string;
+  timestamp: number;
+  type: "parameter" | "rule" | "full";  // What kind of change
+  reason: string;                        // Why the AI suggests this
+  currentValue?: string;                 // Current parameter/rule
+  suggestedValue?: string;               // Suggested change
+  suggestedAlgorithm?: TradingAlgorithm; // For full strategy updates
+  performanceContext: {
+    winRate: number;
+    totalPnl: number;
+    recentTrades: number;
+    drawdown: number;
+  };
+  status: "pending" | "approved" | "rejected" | "auto-applied";
+}
+
+// Live strategy performance metrics
+export interface LiveStrategyMetrics {
+  algorithmId: string;
+  sessionStarted: number;
+  tradesExecuted: number;
+  winningTrades: number;
+  losingTrades: number;
+  totalPnl: number;
+  maxDrawdown: number;
+  currentDrawdown: number;
+  peakPnl: number;
+  lastAnalysis: number;
+  marketCondition?: "trending" | "ranging" | "volatile" | "quiet";
+}
+
 export interface TradeCycleState {
   status: TradeCycleStatus;
   mode: TradingMode;
   executionMode: ExecutionMode;
+  optimizationMode: OptimizationMode;
   exchange: Exchange;
   symbol: string;
   startedAt?: number;
