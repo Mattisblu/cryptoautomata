@@ -4,21 +4,21 @@
 A professional AI-powered cryptocurrency futures trading application with automated trading algorithms, real-time market data, and intelligent trade execution for Coinstore and BYDFI exchanges.
 
 ## Current State
-- **Phase**: Phase 5 - Notifications & Alerts
-- **Last Updated**: November 2024
+- **Phase**: Phase 6 - Live Strategy Optimization
+- **Last Updated**: December 2024
 
 ## Recent Changes
-- Improved AI Chatbot UX: Single "Generate Strategy" button that adapts to trading mode
-  - AI Trading mode: Shows "Generate AI Trading Strategy" 
-  - AI Scalping mode: Shows "Generate Scalping Strategy"
-  - Manual mode: No button, shows explanatory text
-- Enhanced Start Trading validation: Button requires loaded algorithm for AI modes
-  - Manual mode allows starting without an algorithm
-  - Tooltip shows checklist of requirements (exchange, market, algorithm)
-- Notification System: Real-time alerts for trading events
-- NotificationPanel component in Dashboard header with bell icon and unread badge
-- Previous: Strategy Management page, Algorithm versioning, A/B testing
-- Previous features: BYDFI support, Paper/Real toggle, Risk Management, Analytics Dashboard
+- **Live Strategy Optimization System**: AI monitors running strategies and suggests/applies optimizations
+  - Three optimization modes selectable before starting trading:
+    - **Manual Review**: AI generates suggestions, user must approve before applying
+    - **Semi-Auto**: AI auto-applies parameter adjustments (stop-loss, take-profit, position sizing)
+    - **Full-Auto**: AI can rewrite entire strategy automatically based on performance
+  - StrategyOptimizer service runs background analysis every 5 minutes during trading
+  - Live performance metrics displayed in AI chatbot (win rate, PnL, trades count)
+  - OptimizationSuggestionCard component shows pending suggestions with approve/reject buttons
+  - Integrated with trading bot and WebSocket for real-time updates
+- Previous: Notification System, Strategy versioning, A/B testing, Analytics Dashboard
+- AI model changed from gpt-5 to gpt-4o for more reliable responses
 
 ## Architecture
 
@@ -42,29 +42,30 @@ A professional AI-powered cryptocurrency futures trading application with automa
 client/
 ├── src/
 │   ├── components/     # UI components
-│   │   ├── AIChatbot.tsx
+│   │   ├── AIChatbot.tsx          # Chat interface + live metrics + optimization suggestions
 │   │   ├── KlineChart.tsx
 │   │   ├── PositionsTable.tsx
 │   │   ├── OrdersTable.tsx
 │   │   ├── RiskParametersCard.tsx
-│   │   ├── TradeCycleControls.tsx
-│   │   ├── NotificationPanel.tsx  # Alerts dropdown with settings
+│   │   ├── TradeCycleControls.tsx  # Optimization mode selector + trade controls
+│   │   ├── NotificationPanel.tsx   # Alerts dropdown with settings
 │   │   └── ...
 │   ├── hooks/
 │   │   └── useWebSocket.ts
 │   ├── lib/
-│   │   └── tradingContext.tsx
+│   │   └── tradingContext.tsx      # State for optimization mode, suggestions, live metrics
 │   └── pages/
 │       ├── Dashboard.tsx
-│       ├── Analytics.tsx     # Trade history & performance dashboard
-│       └── Strategies.tsx    # Algorithm versioning & A/B testing
+│       ├── Analytics.tsx           # Trade history & performance dashboard
+│       └── Strategies.tsx          # Algorithm versioning & A/B testing
 server/
 ├── db.ts              # Database connection (Drizzle + Neon)
 ├── routes.ts          # API endpoints
 ├── storage.ts         # Data persistence (in-memory + database)
-├── openai.ts          # AI integration
+├── openai.ts          # AI integration (gpt-4o model)
 ├── exchangeService.ts # Exchange API simulation (Coinstore + BYDFI)
-├── tradingBot.ts      # Automated trading logic with trade recording
+├── tradingBot.ts      # Automated trading logic with optimization integration
+├── strategyOptimizer.ts # Live strategy monitoring and AI-powered optimization
 └── notificationService.ts  # Real-time notification dispatch
 shared/
 └── schema.ts          # Type definitions + Drizzle table schemas
