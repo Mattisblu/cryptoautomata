@@ -272,12 +272,38 @@ function extractAlgorithmFromResponse(
   response: string,
   context: MarketContext
 ): TradingAlgorithm | undefined {
-  // Look for JSON code block
-  const jsonMatch = response.match(/```json\s*([\s\S]*?)\s*```/);
-  if (!jsonMatch) return undefined;
+  // Try multiple patterns to find JSON algorithm
+  let jsonString: string | undefined;
+  
+  // Pattern 1: ```json code block
+  const jsonCodeBlockMatch = response.match(/```json\s*([\s\S]*?)\s*```/);
+  if (jsonCodeBlockMatch) {
+    jsonString = jsonCodeBlockMatch[1];
+  }
+  
+  // Pattern 2: ``` code block (without json label)
+  if (!jsonString) {
+    const codeBlockMatch = response.match(/```\s*([\s\S]*?)\s*```/);
+    if (codeBlockMatch && codeBlockMatch[1].includes('"rules"')) {
+      jsonString = codeBlockMatch[1];
+    }
+  }
+  
+  // Pattern 3: Raw JSON object with algorithm structure
+  if (!jsonString) {
+    const jsonObjectMatch = response.match(/\{\s*"(?:id|name)"[\s\S]*?"rules"\s*:\s*\[[\s\S]*?\]\s*,[\s\S]*?"riskManagement"[\s\S]*?\}/);
+    if (jsonObjectMatch) {
+      jsonString = jsonObjectMatch[0];
+    }
+  }
+  
+  if (!jsonString) {
+    console.log("No algorithm JSON found in response");
+    return undefined;
+  }
 
   try {
-    const parsed = JSON.parse(jsonMatch[1]);
+    const parsed = JSON.parse(jsonString);
 
     // Validate and create a proper algorithm structure
     const algorithm: TradingAlgorithm = {

@@ -420,8 +420,14 @@ export function AIChatbot() {
                   <div className="grid grid-cols-3 gap-2 text-[11px]">
                     <div>
                       <span className="text-muted-foreground">Win Rate:</span>
-                      <span className={cn("ml-1 font-medium", liveMetrics.winRate >= 50 ? "text-profit" : "text-loss")}>
-                        {liveMetrics.winRate.toFixed(1)}%
+                      <span className={cn("ml-1 font-medium", 
+                        liveMetrics.tradesExecuted > 0 
+                          ? (liveMetrics.winningTrades / liveMetrics.tradesExecuted * 100) >= 50 ? "text-profit" : "text-loss"
+                          : "text-muted-foreground"
+                      )}>
+                        {liveMetrics.tradesExecuted > 0 
+                          ? (liveMetrics.winningTrades / liveMetrics.tradesExecuted * 100).toFixed(1) 
+                          : "0.0"}%
                       </span>
                     </div>
                     <div>
@@ -432,7 +438,7 @@ export function AIChatbot() {
                     </div>
                     <div>
                       <span className="text-muted-foreground">Trades:</span>
-                      <span className="ml-1 font-medium">{liveMetrics.totalTrades}</span>
+                      <span className="ml-1 font-medium">{liveMetrics.tradesExecuted}</span>
                     </div>
                   </div>
                 </div>
