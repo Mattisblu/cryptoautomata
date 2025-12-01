@@ -18,8 +18,7 @@ import { NotificationPanel } from "@/components/NotificationPanel";
 import { useTradingContext } from "@/lib/tradingContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useQuery } from "@tanstack/react-query";
-import { Bot, BarChart3, Code } from "lucide-react";
-import { Link } from "wouter";
+import { Bot, BarChart3, Code, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Position, Order } from "@shared/schema";
 
@@ -89,18 +88,20 @@ export default function Dashboard() {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
-          <Link href="/strategies">
+          <a href="/strategies" target="_blank" rel="noopener noreferrer">
             <Button variant="ghost" size="sm" className="hidden sm:flex gap-1.5" data-testid="link-strategies">
               <Code className="w-4 h-4" />
               Strategies
+              <ExternalLink className="w-3 h-3 ml-0.5 opacity-50" />
             </Button>
-          </Link>
-          <Link href="/analytics">
+          </a>
+          <a href="/analytics" target="_blank" rel="noopener noreferrer">
             <Button variant="ghost" size="sm" className="hidden sm:flex gap-1.5" data-testid="link-analytics">
               <BarChart3 className="w-4 h-4" />
               Analytics
+              <ExternalLink className="w-3 h-3 ml-0.5 opacity-50" />
             </Button>
-          </Link>
+          </a>
           <NotificationPanel />
           <ConnectionStatus />
           <ThemeToggle />
