@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ExchangeSelector } from "@/components/ExchangeSelector";
 import { MarketSelector } from "@/components/MarketSelector";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
@@ -18,8 +18,9 @@ import { NotificationPanel } from "@/components/NotificationPanel";
 import { useTradingContext } from "@/lib/tradingContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useQuery } from "@tanstack/react-query";
-import { Bot, BarChart3, Code, ExternalLink } from "lucide-react";
+import { Bot, BarChart3, Code, ExternalLink, PanelRightOpen, PanelRightClose, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import type { Position, Order } from "@shared/schema";
 
 export default function Dashboard() {
@@ -31,6 +32,7 @@ export default function Dashboard() {
     setOrders,
   } = useTradingContext();
   const isManualMode = tradingMode === "manual";
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Connect to WebSocket for real-time updates
   useWebSocket();
@@ -66,40 +68,46 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen bg-background" data-testid="dashboard">
       {/* Header */}
-      <header className="flex-shrink-0 h-16 border-b bg-card px-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-6">
+      <header className="flex-shrink-0 h-14 sm:h-16 border-b bg-card px-2 sm:px-4 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="flex items-center gap-2 sm:gap-6">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
-              <Bot className="h-5 w-5 text-primary-foreground" />
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-md bg-primary flex items-center justify-center">
+              <Bot className="h-4 w-4 sm:h-5 sm:w-5 text-primary-foreground" />
             </div>
-            <div className="hidden sm:block">
+            <div className="hidden md:block">
               <h1 className="text-lg font-semibold leading-none">CryptoBot</h1>
               <p className="text-[10px] text-muted-foreground">AI Trading Terminal</p>
             </div>
           </div>
 
           {/* Selectors */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <ExchangeSelector />
             <MarketSelector />
           </div>
         </div>
 
         {/* Right side */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 sm:gap-3">
           <a href="/strategies" target="_blank" rel="noopener noreferrer">
-            <Button variant="ghost" size="sm" className="hidden sm:flex gap-1.5" data-testid="link-strategies">
+            <Button variant="ghost" size="sm" className="hidden lg:flex gap-1.5" data-testid="link-strategies">
               <Code className="w-4 h-4" />
               Strategies
               <ExternalLink className="w-3 h-3 ml-0.5 opacity-50" />
             </Button>
+            <Button variant="ghost" size="icon" className="lg:hidden" data-testid="link-strategies-mobile">
+              <Code className="w-4 h-4" />
+            </Button>
           </a>
           <a href="/analytics" target="_blank" rel="noopener noreferrer">
-            <Button variant="ghost" size="sm" className="hidden sm:flex gap-1.5" data-testid="link-analytics">
+            <Button variant="ghost" size="sm" className="hidden lg:flex gap-1.5" data-testid="link-analytics">
               <BarChart3 className="w-4 h-4" />
               Analytics
               <ExternalLink className="w-3 h-3 ml-0.5 opacity-50" />
+            </Button>
+            <Button variant="ghost" size="icon" className="lg:hidden" data-testid="link-analytics-mobile">
+              <BarChart3 className="w-4 h-4" />
             </Button>
           </a>
           <NotificationPanel />
@@ -114,7 +122,7 @@ export default function Dashboard() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Left Column - Main Trading Area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Trade Cycle Controls */}
@@ -135,8 +143,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right Column - Sidebar */}
-        <div className="w-[380px] border-l bg-card/30 flex flex-col overflow-hidden">
+        {/* Right Column - Desktop Sidebar (hidden on mobile/tablet) */}
+        <div className="hidden xl:flex w-[380px] border-l bg-card/30 flex-col overflow-hidden">
           <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading max-h-[calc(100vh-400px)]">
             {/* Credentials */}
             <CredentialsForm />
@@ -157,6 +165,44 @@ export default function Dashboard() {
               <AIChatbot />
             </div>
           )}
+        </div>
+
+        {/* Mobile/Tablet Sidebar Toggle Button */}
+        <div className="xl:hidden fixed bottom-20 right-4 z-50">
+          <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+            <SheetTrigger asChild>
+              <Button 
+                size="lg" 
+                className="rounded-full shadow-lg h-14 w-14"
+                data-testid="button-toggle-sidebar"
+              >
+                <PanelRightOpen className="h-6 w-6" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full sm:w-[400px] p-0 flex flex-col">
+              <SheetTitle className="sr-only">Trading Panel</SheetTitle>
+              <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading">
+                {/* Credentials */}
+                <CredentialsForm />
+
+                {/* Algorithm Status (AI modes only) */}
+                {!isManualMode && <AlgorithmStatus />}
+
+                {/* Risk Parameters (AI modes only) */}
+                {!isManualMode && <RiskParametersCard />}
+
+                {/* Manual Trading Panel (Manual mode only) */}
+                {isManualMode && <ManualTradingPanel />}
+              </div>
+
+              {/* AI Chatbot (AI modes only) */}
+              {!isManualMode && (
+                <div className="flex-1 min-h-[300px] border-t overflow-hidden">
+                  <AIChatbot />
+                </div>
+              )}
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
 
