@@ -146,7 +146,46 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   
   // Chat & Algorithms
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [activeAlgorithm, setActiveAlgorithm] = useState<TradingAlgorithm | null>(null);
+  const [activeAlgorithm, setActiveAlgorithmState] = useState<TradingAlgorithm | null>(() => {
+    // Initialize from localStorage
+    try {
+      const saved = localStorage.getItem("activeAlgorithm");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  
+  // Sync activeAlgorithm to localStorage and wrap setter
+  const setActiveAlgorithm = useCallback((algo: TradingAlgorithm | null) => {
+    setActiveAlgorithmState(algo);
+    try {
+      if (algo) {
+        localStorage.setItem("activeAlgorithm", JSON.stringify(algo));
+      } else {
+        localStorage.removeItem("activeAlgorithm");
+      }
+    } catch (e) {
+      console.warn("Failed to save algorithm to localStorage:", e);
+    }
+  }, []);
+  
+  // Listen for localStorage changes from other tabs
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "activeAlgorithm") {
+        try {
+          const newAlgo = e.newValue ? JSON.parse(e.newValue) : null;
+          setActiveAlgorithmState(newAlgo);
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    };
+    
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
   
   // Trade cycle
   const [tradeCycleState, setTradeCycleState] = useState<TradeCycleState>({

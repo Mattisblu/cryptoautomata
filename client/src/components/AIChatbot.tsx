@@ -22,6 +22,7 @@ function formatTime(timestamp: number): string {
 
 function AlgorithmDisplay({ algorithm, onLoad }: { algorithm: TradingAlgorithm; onLoad: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [showJson, setShowJson] = useState(false);
   const { activeAlgorithm, setActiveAlgorithm } = useTradingContext();
   const isActive = activeAlgorithm?.id === algorithm.id;
 
@@ -38,21 +39,34 @@ function AlgorithmDisplay({ algorithm, onLoad }: { algorithm: TradingAlgorithm; 
 
   return (
     <div className="mt-3 border rounded-md bg-muted/30 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
-        <div className="flex items-center gap-2">
-          <Code className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium">{algorithm.name}</span>
-          <Badge variant="outline" className="text-[10px]">
-            v{algorithm.version}
-          </Badge>
-        </div>
+      {/* Header with algorithm info */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/50">
+        <Code className="h-4 w-4 text-primary flex-shrink-0" />
+        <span className="text-sm font-medium truncate">{algorithm.name}</span>
+        <Badge variant="outline" className="text-[10px] flex-shrink-0">
+          v{algorithm.version}
+        </Badge>
+      </div>
+      
+      {/* Action buttons - Always visible at top */}
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-background/50">
+        <Button
+          variant={isActive ? "secondary" : "default"}
+          size="sm"
+          className="h-8 text-xs flex-1"
+          onClick={loadAlgorithm}
+          disabled={isActive}
+          data-testid="button-load-algorithm"
+        >
+          {isActive ? "Algorithm Loaded" : "Load Algorithm"}
+        </Button>
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="icon"
-                className="h-7 w-7"
+                className="h-8 w-8"
                 onClick={copyToClipboard}
               >
                 {copied ? (
@@ -65,20 +79,22 @@ function AlgorithmDisplay({ algorithm, onLoad }: { algorithm: TradingAlgorithm; 
             <TooltipContent>Copy JSON</TooltipContent>
           </Tooltip>
           <Button
-            variant={isActive ? "secondary" : "default"}
+            variant="outline"
             size="sm"
-            className="h-7 text-xs"
-            onClick={loadAlgorithm}
-            disabled={isActive}
-            data-testid="button-load-algorithm"
+            className="h-8 text-xs"
+            onClick={() => setShowJson(!showJson)}
           >
-            {isActive ? "Loaded" : "Load Algorithm"}
+            {showJson ? "Hide" : "View"} JSON
           </Button>
         </div>
       </div>
-      <pre className="p-3 text-xs font-mono overflow-x-auto max-h-[200px] scrollbar-trading">
-        {JSON.stringify(algorithm, null, 2)}
-      </pre>
+      
+      {/* Collapsible JSON display */}
+      {showJson && (
+        <pre className="p-3 text-xs font-mono overflow-x-auto max-h-[150px] scrollbar-trading border-t">
+          {JSON.stringify(algorithm, null, 2)}
+        </pre>
+      )}
     </div>
   );
 }

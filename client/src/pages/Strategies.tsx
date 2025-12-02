@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { 
   Code, 
   Plus, 
@@ -16,7 +17,8 @@ import {
   ChevronRight,
   Copy,
   CheckCircle,
-  Loader2
+  Loader2,
+  ArrowLeft
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -461,11 +463,22 @@ export default function Strategies() {
   return (
     <div className="container max-w-6xl mx-auto p-4 space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Strategy Management</h1>
-          <p className="text-muted-foreground text-sm">
-            Manage your trading algorithms, version history, and A/B tests
-          </p>
+        <div className="flex items-center gap-3">
+          <Link href="/">
+            <Button variant="ghost" size="sm" data-testid="button-back-to-dashboard">
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              Back
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Code className="w-6 h-6 text-primary" />
+              Strategy Management
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Manage your trading algorithms, version history, and A/B tests
+            </p>
+          </div>
         </div>
       </div>
 
