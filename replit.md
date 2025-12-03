@@ -4,19 +4,25 @@
 A professional AI-powered cryptocurrency futures trading application with automated trading algorithms, real-time market data, and intelligent trade execution for Coinstore and BYDFI exchanges.
 
 ## Current State
-- **Phase**: Phase 6 - Live Strategy Optimization
+- **Phase**: Phase 7 - Multi-Strategy Support
 - **Last Updated**: December 2024
 
 ## Recent Changes
-- **Live Strategy Optimization System**: AI monitors running strategies and suggests/applies optimizations
-  - Three optimization modes selectable before starting trading:
-    - **Manual Review**: AI generates suggestions, user must approve before applying
-    - **Semi-Auto**: AI auto-applies parameter adjustments (stop-loss, take-profit, position sizing)
-    - **Full-Auto**: AI can rewrite entire strategy automatically based on performance
-  - StrategyOptimizer service runs background analysis every 5 minutes during trading
-  - Live performance metrics displayed in AI chatbot (win rate, PnL, trades count)
-  - OptimizationSuggestionCard component shows pending suggestions with approve/reject buttons
-  - Integrated with trading bot and WebSocket for real-time updates
+- **Multi-Strategy Support**: Run multiple trading algorithms simultaneously on different markets
+  - `StrategyOrchestrator` service manages multiple bot instances concurrently
+  - Each strategy session has a unique `sessionId` with independent state tracking
+  - `runningStrategies` database table persists session info (exchange, symbol, algorithm, status)
+  - Strategies page now has 3 tabs: Running, Algorithms, A/B Tests
+  - Running Strategies tab shows active sessions with real-time metrics (PnL, trades, win rate)
+  - Individual controls per session: Pause, Resume, Stop, Close All
+  - API endpoints for multi-strategy management:
+    - `GET /api/running-strategies` - List all running strategy sessions
+    - `POST /api/strategies/:algorithmId/start` - Start a new strategy session
+    - `POST /api/running-strategies/:sessionId/pause|resume|stop|close-all` - Control individual sessions
+- **Previous: Live Strategy Optimization System**: AI monitors running strategies and suggests/applies optimizations
+  - Three optimization modes: Manual Review, Semi-Auto, Full-Auto
+  - StrategyOptimizer service runs background analysis every 5 minutes
+  - Live performance metrics displayed in AI chatbot
 - Previous: Notification System, Strategy versioning, A/B testing, Analytics Dashboard
 - AI model changed from gpt-5 to gpt-4o for more reliable responses
 
@@ -65,6 +71,7 @@ server/
 ├── openai.ts          # AI integration (gpt-4o model)
 ├── exchangeService.ts # Exchange API simulation (Coinstore + BYDFI)
 ├── tradingBot.ts      # Automated trading logic with optimization integration
+├── strategyOrchestrator.ts # Multi-strategy management, runs multiple bot instances
 ├── strategyOptimizer.ts # Live strategy monitoring and AI-powered optimization
 └── notificationService.ts  # Real-time notification dispatch
 shared/

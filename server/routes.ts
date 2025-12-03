@@ -5,9 +5,10 @@ import { storage } from "./storage";
 import { exchangeService, createTickerStream } from "./exchangeService";
 import { analyzeAndRespond } from "./openai";
 import { tradingBot } from "./tradingBot";
+import { strategyOrchestrator } from "./strategyOrchestrator";
 import { notificationService } from "./notificationService";
 import { apiCredentialsSchema, manualOrderSchema, riskParametersSchema, insertTradeSchema } from "@shared/schema";
-import type { Exchange, TradeCycleState, StopOrder } from "@shared/schema";
+import type { Exchange, TradeCycleState, StopOrder, RunningStrategyStatus } from "@shared/schema";
 import { z } from "zod";
 
 // Schema for trade update validation
@@ -882,6 +883,119 @@ export async function registerRoutes(app: Express): Promise<Server> {
         symbol: "",
       };
       res.json({ success: true, state: state || defaultState });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // ============ RUNNING STRATEGIES ROUTES ============
+
+  app.get("/api/running-strategies", async (req, res) => {
+    try {
+      const exchange = req.query.exchange as string | undefined;
+      const status = req.query.status as RunningStrategyStatus | undefined;
+      
+      const strategies = await storage.getRunningStrategies({ exchange, status });
+      res.json({ success: true, strategies });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.get("/api/running-strategies/:sessionId", async (req, res) => {
+    try {
+      const strategy = await storage.getRunningStrategy(req.params.sessionId);
+      if (!strategy) {
+        return res.status(404).json({ success: false, error: "Strategy session not found" });
+      }
+      res.json({ success: true, strategy });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/strategies/:algorithmId/start", async (req, res) => {
+    try {
+      const { algorithmId } = req.params;
+      const { exchange, symbol, executionMode, optimizationMode } = req.body;
+
+      if (!exchange || !symbol) {
+        return res.status(400).json({ success: false, error: "Exchange and symbol are required" });
+      }
+
+      const algorithm = await storage.getAlgorithm(algorithmId);
+      if (!algorithm) {
+        return res.status(404).json({ success: false, error: "Algorithm not found" });
+      }
+
+      const credentials = await storage.getCredentials(exchange as Exchange);
+      if (!credentials) {
+        return res.status(401).json({ success: false, error: "Not authenticated to exchange" });
+      }
+
+      const sessionId = await strategyOrchestrator.startStrategy({
+        exchange: exchange as Exchange,
+        symbol,
+        algorithm,
+        executionMode: executionMode || "paper",
+        optimizationMode: optimizationMode || "manual",
+        onOptimizationSuggestion: (suggestion) => {
+          broadcast("optimizationSuggestion", { ...suggestion, sessionId });
+        },
+        onMetricsUpdate: (metrics) => {
+          broadcast("liveMetrics", { ...metrics, sessionId });
+        },
+        onAlgorithmUpdate: (algo) => {
+          broadcast("algorithmUpdate", { algorithm: algo, sessionId });
+        },
+      });
+
+      const strategy = await storage.getRunningStrategy(sessionId);
+      broadcast("strategyStarted", strategy);
+
+      res.json({ success: true, sessionId, strategy });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/running-strategies/:sessionId/pause", async (req, res) => {
+    try {
+      await strategyOrchestrator.pauseStrategy(req.params.sessionId);
+      const strategy = await storage.getRunningStrategy(req.params.sessionId);
+      broadcast("strategyUpdated", strategy);
+      res.json({ success: true, strategy });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/running-strategies/:sessionId/resume", async (req, res) => {
+    try {
+      await strategyOrchestrator.resumeStrategy(req.params.sessionId);
+      const strategy = await storage.getRunningStrategy(req.params.sessionId);
+      broadcast("strategyUpdated", strategy);
+      res.json({ success: true, strategy });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/running-strategies/:sessionId/stop", async (req, res) => {
+    try {
+      await strategyOrchestrator.stopStrategy(req.params.sessionId);
+      broadcast("strategyStopped", { sessionId: req.params.sessionId });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/running-strategies/:sessionId/close-all", async (req, res) => {
+    try {
+      await strategyOrchestrator.closeAllPositionsAndStop(req.params.sessionId);
+      broadcast("strategyStopped", { sessionId: req.params.sessionId });
+      res.json({ success: true });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }

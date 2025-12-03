@@ -10,6 +10,7 @@ import {
   Trophy, 
   Play, 
   Square,
+  Pause,
   RotateCcw,
   TrendingUp,
   TrendingDown,
@@ -18,7 +19,11 @@ import {
   Copy,
   CheckCircle,
   Loader2,
-  ArrowLeft
+  ArrowLeft,
+  Activity,
+  StopCircle,
+  Zap,
+  Clock
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,7 +61,7 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useTradingContext } from "@/lib/tradingContext";
-import type { TradingAlgorithm, AlgorithmVersion, AbTest } from "@shared/schema";
+import type { TradingAlgorithm, AlgorithmVersion, AbTest, RunningStrategy } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
 function formatDate(timestamp: number | Date | string | null): string {
@@ -362,6 +367,130 @@ function ABTestCard({ test, onComplete, onDelete }: {
   );
 }
 
+function RunningStrategyCard({ 
+  strategy, 
+  onPause,
+  onResume,
+  onStop,
+  onCloseAll,
+}: { 
+  strategy: RunningStrategy;
+  onPause: () => void;
+  onResume: () => void;
+  onStop: () => void;
+  onCloseAll: () => void;
+}) {
+  const isRunning = strategy.status === "running";
+  const isPaused = strategy.status === "paused";
+
+  const runtime = strategy.startedAt 
+    ? Math.floor((Date.now() - new Date(strategy.startedAt).getTime()) / 1000 / 60) 
+    : 0;
+
+  return (
+    <Card className={cn(
+      isRunning && "border-profit",
+      isPaused && "border-yellow-500"
+    )}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">{strategy.algorithmName || "Strategy"}</CardTitle>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge 
+              variant={isRunning ? "default" : isPaused ? "secondary" : "outline"}
+              className={cn(
+                "text-xs",
+                isRunning && "bg-profit text-white",
+                isPaused && "bg-yellow-500 text-white"
+              )}
+            >
+              {isRunning && <Zap className="h-3 w-3 mr-1" />}
+              {isPaused && <Pause className="h-3 w-3 mr-1" />}
+              {strategy.status.charAt(0).toUpperCase() + strategy.status.slice(1)}
+            </Badge>
+            <Badge variant="outline" className="text-xs">
+              {strategy.executionMode === "paper" ? "Paper" : "Real"}
+            </Badge>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+          <div>
+            <span className="text-muted-foreground text-xs">Exchange</span>
+            <p className="font-medium">{strategy.exchange.toUpperCase()}</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-xs">Symbol</span>
+            <p className="font-mono font-medium">{strategy.symbol}</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-xs">Optimization</span>
+            <p className="font-medium capitalize">{strategy.optimizationMode}</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-xs">Runtime</span>
+            <p className="font-mono font-medium flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {runtime}m
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4 text-sm border-t pt-4">
+          <div>
+            <span className="text-muted-foreground text-xs">Trades</span>
+            <p className="font-mono font-medium">{strategy.tradesCount || 0}</p>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-xs">PnL</span>
+            <p className={cn(
+              "font-mono font-medium",
+              (strategy.totalPnl || 0) >= 0 ? "text-profit" : "text-loss"
+            )}>
+              {(strategy.totalPnl || 0) >= 0 ? "+" : ""}${(strategy.totalPnl || 0).toFixed(2)}
+            </p>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-xs">Win Rate</span>
+            <p className="font-mono font-medium">{(strategy.winRate || 0).toFixed(1)}%</p>
+          </div>
+        </div>
+
+        <div className="text-xs text-muted-foreground">
+          Started {formatDate(strategy.startedAt)}
+        </div>
+
+        <div className="flex gap-2 pt-2 border-t flex-wrap">
+          {isRunning && (
+            <Button size="sm" variant="outline" onClick={onPause}>
+              <Pause className="h-3.5 w-3.5 mr-1" />
+              Pause
+            </Button>
+          )}
+          {isPaused && (
+            <Button size="sm" variant="outline" className="bg-profit text-white hover:bg-profit/90" onClick={onResume}>
+              <Play className="h-3.5 w-3.5 mr-1" />
+              Resume
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={onStop}>
+            <Square className="h-3.5 w-3.5 mr-1" />
+            Stop
+          </Button>
+          <Button size="sm" variant="ghost" className="text-loss" onClick={onCloseAll}>
+            <StopCircle className="h-3.5 w-3.5 mr-1" />
+            Close All
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Strategies() {
   const { toast } = useToast();
   const { selectedExchange, selectedMarket } = useTradingContext();
@@ -381,6 +510,63 @@ export default function Strategies() {
 
   const { data: abTestsData, isLoading: abTestsLoading } = useQuery<{ tests: AbTest[] }>({
     queryKey: ["/api/ab-tests"],
+  });
+
+  const { data: runningStrategiesData, isLoading: runningStrategiesLoading } = useQuery<{ strategies: RunningStrategy[] }>({
+    queryKey: ["/api/running-strategies"],
+    refetchInterval: 5000,
+  });
+
+  const pauseStrategyMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      return apiRequest("POST", `/api/running-strategies/${sessionId}/pause`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/running-strategies"] });
+      toast({ title: "Strategy Paused" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Pause Failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resumeStrategyMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      return apiRequest("POST", `/api/running-strategies/${sessionId}/resume`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/running-strategies"] });
+      toast({ title: "Strategy Resumed" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Resume Failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const stopStrategyMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      return apiRequest("POST", `/api/running-strategies/${sessionId}/stop`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/running-strategies"] });
+      toast({ title: "Strategy Stopped" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Stop Failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const closeAllStrategyMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      return apiRequest("POST", `/api/running-strategies/${sessionId}/close-all`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/running-strategies"] });
+      toast({ title: "Strategy Stopped", description: "All positions closed." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Close Failed", description: error.message, variant: "destructive" });
+    },
   });
 
   const deleteAlgorithmMutation = useMutation({
@@ -459,6 +645,8 @@ export default function Strategies() {
 
   const algorithms = algorithmsData?.algorithms || [];
   const abTests = abTestsData?.tests || [];
+  const runningStrategies = runningStrategiesData?.strategies || [];
+  const activeStrategies = runningStrategies.filter(s => s.status === "running" || s.status === "paused");
 
   return (
     <div className="container max-w-6xl mx-auto p-4 space-y-6">
@@ -482,16 +670,23 @@ export default function Strategies() {
         </div>
       </div>
 
-      <Tabs defaultValue="algorithms">
-        <TabsList>
-          <TabsTrigger value="algorithms" className="gap-2">
+      <Tabs defaultValue="running">
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="running" className="gap-2" data-testid="tab-running-strategies">
+            <Activity className="h-4 w-4" />
+            Running
+            {activeStrategies.length > 0 && (
+              <Badge className="ml-1 bg-profit">{activeStrategies.length}</Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="algorithms" className="gap-2" data-testid="tab-algorithms">
             <Code className="h-4 w-4" />
             Algorithms
             {algorithms.length > 0 && (
               <Badge variant="secondary" className="ml-1">{algorithms.length}</Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="ab-tests" className="gap-2">
+          <TabsTrigger value="ab-tests" className="gap-2" data-testid="tab-ab-tests">
             <FlaskConical className="h-4 w-4" />
             A/B Tests
             {abTests.filter(t => t.status === "running").length > 0 && (
@@ -499,6 +694,51 @@ export default function Strategies() {
             )}
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="running" className="mt-6">
+          {runningStrategiesLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : activeStrategies.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <Activity className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium mb-2">No Running Strategies</h3>
+                <p className="text-muted-foreground text-sm max-w-md mb-4">
+                  Start a strategy from the Algorithms tab or use the AI chatbot on the Dashboard 
+                  to generate and run trading algorithms.
+                </p>
+                <Link href="/">
+                  <Button data-testid="button-go-to-dashboard">
+                    <Play className="h-4 w-4 mr-2" />
+                    Go to Dashboard
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  {activeStrategies.length} active {activeStrategies.length === 1 ? "strategy" : "strategies"}
+                </p>
+              </div>
+              <div className="grid md:grid-cols-2 gap-4">
+                {activeStrategies.map((strategy) => (
+                  <RunningStrategyCard
+                    key={strategy.sessionId}
+                    strategy={strategy}
+                    onPause={() => pauseStrategyMutation.mutate(strategy.sessionId)}
+                    onResume={() => resumeStrategyMutation.mutate(strategy.sessionId)}
+                    onStop={() => stopStrategyMutation.mutate(strategy.sessionId)}
+                    onCloseAll={() => closeAllStrategyMutation.mutate(strategy.sessionId)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </TabsContent>
 
         <TabsContent value="algorithms" className="mt-6">
           {algorithmsLoading ? (

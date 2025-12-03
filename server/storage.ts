@@ -26,8 +26,11 @@ import type {
   Notification,
   InsertNotification,
   NotificationSettings,
+  RunningStrategy,
+  InsertRunningStrategy,
+  RunningStrategyStatus,
 } from "@shared/schema";
-import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings } from "@shared/schema";
+import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 
@@ -147,6 +150,16 @@ export interface IStorage {
   // Notification Settings
   getNotificationSettings(): Promise<NotificationSettings | null>;
   saveNotificationSettings(settings: Partial<NotificationSettings>): Promise<NotificationSettings>;
+
+  // Running Strategies
+  createRunningStrategy(strategy: InsertRunningStrategy): Promise<RunningStrategy>;
+  getRunningStrategies(options?: { exchange?: string; status?: RunningStrategyStatus }): Promise<RunningStrategy[]>;
+  getRunningStrategy(sessionId: string): Promise<RunningStrategy | null>;
+  getRunningStrategyByMarket(exchange: string, symbol: string): Promise<RunningStrategy | null>;
+  updateRunningStrategy(sessionId: string, updates: Partial<RunningStrategy>): Promise<RunningStrategy | null>;
+  stopRunningStrategy(sessionId: string, errorMessage?: string): Promise<void>;
+  updateRunningStrategyHeartbeat(sessionId: string): Promise<void>;
+  cleanupStaleStrategies(maxAgeMs?: number): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -683,6 +696,95 @@ export class MemStorage implements IStorage {
         .returning();
       return newSettings;
     }
+  }
+
+  // ============ RUNNING STRATEGIES ============
+
+  async createRunningStrategy(strategy: InsertRunningStrategy): Promise<RunningStrategy> {
+    const [newStrategy] = await db.insert(runningStrategies).values(strategy).returning();
+    return newStrategy;
+  }
+
+  async getRunningStrategies(options?: { exchange?: string; status?: RunningStrategyStatus }): Promise<RunningStrategy[]> {
+    let query = db.select().from(runningStrategies);
+    
+    const conditions = [];
+    if (options?.exchange) {
+      conditions.push(eq(runningStrategies.exchange, options.exchange));
+    }
+    if (options?.status) {
+      conditions.push(eq(runningStrategies.status, options.status));
+    }
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as typeof query;
+    }
+    
+    return query.orderBy(desc(runningStrategies.startedAt));
+  }
+
+  async getRunningStrategy(sessionId: string): Promise<RunningStrategy | null> {
+    const [strategy] = await db
+      .select()
+      .from(runningStrategies)
+      .where(eq(runningStrategies.sessionId, sessionId))
+      .limit(1);
+    return strategy || null;
+  }
+
+  async getRunningStrategyByMarket(exchange: string, symbol: string): Promise<RunningStrategy | null> {
+    const [strategy] = await db
+      .select()
+      .from(runningStrategies)
+      .where(
+        and(
+          eq(runningStrategies.exchange, exchange),
+          eq(runningStrategies.symbol, symbol),
+          eq(runningStrategies.status, "running")
+        )
+      )
+      .limit(1);
+    return strategy || null;
+  }
+
+  async updateRunningStrategy(sessionId: string, updates: Partial<RunningStrategy>): Promise<RunningStrategy | null> {
+    const [updated] = await db
+      .update(runningStrategies)
+      .set(updates)
+      .where(eq(runningStrategies.sessionId, sessionId))
+      .returning();
+    return updated || null;
+  }
+
+  async stopRunningStrategy(sessionId: string, errorMessage?: string): Promise<void> {
+    await db
+      .update(runningStrategies)
+      .set({
+        status: errorMessage ? "error" : "stopped",
+        stoppedAt: new Date(),
+        errorMessage: errorMessage || null,
+      })
+      .where(eq(runningStrategies.sessionId, sessionId));
+  }
+
+  async updateRunningStrategyHeartbeat(sessionId: string): Promise<void> {
+    await db
+      .update(runningStrategies)
+      .set({ lastHeartbeat: new Date() })
+      .where(eq(runningStrategies.sessionId, sessionId));
+  }
+
+  async cleanupStaleStrategies(maxAgeMs: number = 5 * 60 * 1000): Promise<void> {
+    const cutoffTime = new Date(Date.now() - maxAgeMs);
+    await db
+      .update(runningStrategies)
+      .set({ status: "stopped", stoppedAt: new Date(), errorMessage: "Stale heartbeat - auto-stopped" })
+      .where(
+        and(
+          eq(runningStrategies.status, "running"),
+          lte(runningStrategies.lastHeartbeat, cutoffTime)
+        )
+      );
   }
 }
 

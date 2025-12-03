@@ -133,6 +133,27 @@ export const abTests = pgTable("ab_tests", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Running Strategies - tracks active trading bot sessions
+export const runningStrategies = pgTable("running_strategies", {
+  id: serial("id").primaryKey(),
+  sessionId: text("session_id").notNull().unique(), // Unique session identifier
+  algorithmId: text("algorithm_id").notNull(),
+  algorithmName: text("algorithm_name").notNull(),
+  algorithmVersion: integer("algorithm_version").notNull().default(1),
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  executionMode: text("execution_mode").notNull().default("paper"), // "paper" or "real"
+  optimizationMode: text("optimization_mode").notNull().default("manual"), // "manual", "semi-auto", "full-auto"
+  status: text("status").notNull().default("running"), // "running", "paused", "stopped", "error"
+  totalTrades: integer("total_trades").notNull().default(0),
+  successfulTrades: integer("successful_trades").notNull().default(0),
+  totalPnl: real("total_pnl").notNull().default(0),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  lastHeartbeat: timestamp("last_heartbeat").notNull().defaultNow(),
+  stoppedAt: timestamp("stopped_at"),
+  errorMessage: text("error_message"),
+});
+
 // Relations
 export const tradesRelations = relations(trades, ({ }) => ({}));
 export const dailySummariesRelations = relations(dailySummaries, ({ }) => ({}));
@@ -141,6 +162,7 @@ export const algorithmVersionsRelations = relations(algorithmVersions, ({ }) => 
 export const abTestsRelations = relations(abTests, ({ }) => ({}));
 export const notificationsRelations = relations(notifications, ({ }) => ({}));
 export const notificationSettingsRelations = relations(notificationSettings, ({ }) => ({}));
+export const runningStrategiesRelations = relations(runningStrategies, ({ }) => ({}));
 
 // Insert schemas
 export const insertTradeSchema = createInsertSchema(trades).omit({ id: true });
@@ -170,6 +192,14 @@ export type Notification = typeof notifications.$inferSelect;
 export const insertNotificationSettingsSchema = createInsertSchema(notificationSettings).omit({ id: true });
 export type InsertNotificationSettings = z.infer<typeof insertNotificationSettingsSchema>;
 export type NotificationSettings = typeof notificationSettings.$inferSelect;
+
+export const insertRunningStrategySchema = createInsertSchema(runningStrategies).omit({ id: true });
+export type InsertRunningStrategy = z.infer<typeof insertRunningStrategySchema>;
+export type RunningStrategy = typeof runningStrategies.$inferSelect;
+
+// Running strategy status type
+export const runningStrategyStatuses = ["running", "paused", "stopped", "error"] as const;
+export type RunningStrategyStatus = typeof runningStrategyStatuses[number];
 
 // Notification types for frontend
 export const notificationTypes = ["trade_open", "trade_close", "stop_loss", "take_profit", "trailing_stop", "error", "info"] as const;
