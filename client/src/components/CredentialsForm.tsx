@@ -161,6 +161,13 @@ export function CredentialsForm() {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {!selectedExchange && (
+          <div className="mb-4 p-3 bg-muted/50 border border-dashed rounded-md text-center">
+            <p className="text-sm text-muted-foreground">
+              Select an exchange from the header first to enter your API credentials
+            </p>
+          </div>
+        )}
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
@@ -285,12 +292,6 @@ export function CredentialsForm() {
                 </>
               )}
             </Button>
-
-            {!selectedExchange && (
-              <p className="text-xs text-center text-muted-foreground">
-                Select an exchange first to enter credentials
-              </p>
-            )}
           </form>
         </Form>
       </CardContent>
