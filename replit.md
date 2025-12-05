@@ -8,12 +8,18 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: December 2024
 
 ## Recent Changes
+- **Per-Request Data Source Tracking**: Eliminated race conditions with proper per-request tracking
+  - Service functions return result types: `TickerResult`, `KlinesResult`, `MarketsResult`
+  - Each result includes `{ data, dataSource, dataError }` embedded directly
+  - No global state used for data source tracking - each call returns its own source
+  - All trading services (tradingBot, strategyOrchestrator, strategyOptimizer) updated
+  - API clients return `ApiResult<T>` with structured error codes
 - **Live API Data Integration**: Real-time market data from exchange APIs with automatic fallback
   - Created `coinstoreApi.ts` and `bydfiApi.ts` API client modules with HMAC-SHA256 authentication
   - `exchangeService.ts` now tries live API first, falls back to simulation if API unavailable
-  - Data source indicator in TickerBar shows "LIVE" (green) or "SIM" (amber) badge
-  - WebSocket messages include `dataSource` field for real-time tracking
-  - Market data endpoints return `dataSource` in response for transparency
+  - Data source indicator in TickerBar shows "LIVE" (green) or "SIM" (amber) badge with error tooltip
+  - WebSocket messages include `dataSource` and `dataError` fields for real-time tracking
+  - Market data endpoints return `dataSource` and `dataError` in response for transparency
   - Environment variable `USE_LIVE_API=false` can disable live API attempts
 - **Multi-Strategy Support**: Run multiple trading algorithms simultaneously on different markets
   - `StrategyOrchestrator` service manages multiple bot instances concurrently
