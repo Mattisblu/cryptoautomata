@@ -13,7 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Market, MarketsResponse } from "@shared/schema";
 
 export function MarketSelector() {
-  const { selectedExchange, selectedMarket, setSelectedMarket, markets, setMarkets } = useTradingContext();
+  const { selectedExchange, selectedMarket, setSelectedMarket, markets, setMarkets, setTicker, setKlines } = useTradingContext();
   const [searchQuery, setSearchQuery] = useState("");
 
   const { data, isLoading } = useQuery<MarketsResponse>({
@@ -41,6 +41,9 @@ export function MarketSelector() {
   const handleMarketChange = (symbol: string) => {
     const market = markets.find((m) => m.symbol === symbol);
     if (market) {
+      // Clear old ticker and klines data immediately to prevent flicker
+      setTicker(null);
+      setKlines([]);
       setSelectedMarket(market);
     }
   };

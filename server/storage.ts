@@ -30,7 +30,7 @@ import type {
   InsertRunningStrategy,
   RunningStrategyStatus,
 } from "@shared/schema";
-import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies } from "@shared/schema";
+import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies, algorithms } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 
@@ -170,7 +170,7 @@ export class MemStorage implements IStorage {
   private positions: Map<Exchange, Position[]> = new Map();
   private orders: Map<Exchange, Order[]> = new Map();
   private stopOrders: Map<Exchange, StopOrder[]> = new Map();
-  private algorithms: Map<string, TradingAlgorithm> = new Map();
+  // Note: algorithms are now stored in the database, not in-memory
   private chatMessages: ChatMessage[] = [];
   private tradeCycleState: TradeCycleState | null = null;
   private tradeLogs: TradeLogEntry[] = [];
@@ -333,27 +333,66 @@ export class MemStorage implements IStorage {
     this.riskParameters = params;
   }
 
-  // Algorithms
+  // Algorithms (Database-backed for persistence)
   async getAlgorithms(): Promise<TradingAlgorithm[]> {
-    return Array.from(this.algorithms.values());
+    const dbAlgorithms = await db.select().from(algorithms).orderBy(desc(algorithms.createdAt));
+    return dbAlgorithms.map(alg => ({
+      id: alg.id,
+      name: alg.name,
+      mode: alg.mode as TradingMode,
+      symbol: alg.symbol,
+      version: alg.version,
+      rules: JSON.parse(alg.rules),
+      riskManagement: JSON.parse(alg.riskManagement),
+      createdAt: alg.createdAt.getTime(),
+    }));
   }
 
   async getAlgorithm(id: string): Promise<TradingAlgorithm | null> {
-    return this.algorithms.get(id) || null;
+    const [alg] = await db.select().from(algorithms).where(eq(algorithms.id, id));
+    if (!alg) return null;
+    return {
+      id: alg.id,
+      name: alg.name,
+      mode: alg.mode as TradingMode,
+      symbol: alg.symbol,
+      version: alg.version,
+      rules: JSON.parse(alg.rules),
+      riskManagement: JSON.parse(alg.riskManagement),
+      createdAt: alg.createdAt.getTime(),
+    };
   }
 
   async saveAlgorithm(algorithm: TradingAlgorithm): Promise<void> {
-    this.algorithms.set(algorithm.id, algorithm);
+    await db.insert(algorithms).values({
+      id: algorithm.id,
+      name: algorithm.name,
+      mode: algorithm.mode,
+      symbol: algorithm.symbol,
+      version: algorithm.version,
+      rules: JSON.stringify(algorithm.rules),
+      riskManagement: JSON.stringify(algorithm.riskManagement),
+      createdAt: new Date(algorithm.createdAt || Date.now()),
+      updatedAt: new Date(),
+    });
   }
 
   async updateAlgorithm(algorithm: TradingAlgorithm): Promise<void> {
-    if (this.algorithms.has(algorithm.id)) {
-      this.algorithms.set(algorithm.id, algorithm);
-    }
+    await db.update(algorithms)
+      .set({
+        name: algorithm.name,
+        mode: algorithm.mode,
+        symbol: algorithm.symbol,
+        version: algorithm.version,
+        rules: JSON.stringify(algorithm.rules),
+        riskManagement: JSON.stringify(algorithm.riskManagement),
+        updatedAt: new Date(),
+      })
+      .where(eq(algorithms.id, algorithm.id));
   }
 
   async deleteAlgorithm(id: string): Promise<void> {
-    this.algorithms.delete(id);
+    await db.delete(algorithms).where(eq(algorithms.id, id));
   }
 
   // Chat Messages

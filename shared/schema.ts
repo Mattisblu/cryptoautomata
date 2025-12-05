@@ -154,11 +154,25 @@ export const runningStrategies = pgTable("running_strategies", {
   errorMessage: text("error_message"),
 });
 
+// Algorithms - persists trading algorithms
+export const algorithms = pgTable("algorithms", {
+  id: text("id").primaryKey(), // UUID string
+  name: text("name").notNull(),
+  mode: text("mode").notNull(), // ai-trading, ai-scalping, manual
+  symbol: text("symbol").notNull(),
+  version: integer("version").notNull().default(1),
+  rules: text("rules").notNull(), // JSON string of TradingRule[]
+  riskManagement: text("risk_management").notNull(), // JSON string of RiskManagement
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Relations
 export const tradesRelations = relations(trades, ({ }) => ({}));
 export const dailySummariesRelations = relations(dailySummaries, ({ }) => ({}));
 export const algorithmPerformanceRelations = relations(algorithmPerformance, ({ }) => ({}));
 export const algorithmVersionsRelations = relations(algorithmVersions, ({ }) => ({}));
+export const algorithmsRelations = relations(algorithms, ({ }) => ({}));
 export const abTestsRelations = relations(abTests, ({ }) => ({}));
 export const notificationsRelations = relations(notifications, ({ }) => ({}));
 export const notificationSettingsRelations = relations(notificationSettings, ({ }) => ({}));
@@ -196,6 +210,10 @@ export type NotificationSettings = typeof notificationSettings.$inferSelect;
 export const insertRunningStrategySchema = createInsertSchema(runningStrategies).omit({ id: true });
 export type InsertRunningStrategy = z.infer<typeof insertRunningStrategySchema>;
 export type RunningStrategy = typeof runningStrategies.$inferSelect;
+
+export const insertAlgorithmDbSchema = createInsertSchema(algorithms);
+export type InsertAlgorithmDb = z.infer<typeof insertAlgorithmDbSchema>;
+export type AlgorithmDb = typeof algorithms.$inferSelect;
 
 // Running strategy status type
 export const runningStrategyStatuses = ["running", "paused", "stopped", "error"] as const;
