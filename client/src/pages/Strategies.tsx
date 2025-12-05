@@ -443,7 +443,7 @@ function RunningStrategyCard({
         <div className="grid grid-cols-3 gap-4 text-sm border-t pt-4">
           <div>
             <span className="text-muted-foreground text-xs">Trades</span>
-            <p className="font-mono font-medium">{strategy.tradesCount || 0}</p>
+            <p className="font-mono font-medium">{strategy.totalTrades || 0}</p>
           </div>
           <div>
             <span className="text-muted-foreground text-xs">PnL</span>
@@ -456,7 +456,11 @@ function RunningStrategyCard({
           </div>
           <div>
             <span className="text-muted-foreground text-xs">Win Rate</span>
-            <p className="font-mono font-medium">{(strategy.winRate || 0).toFixed(1)}%</p>
+            <p className="font-mono font-medium">
+              {strategy.totalTrades > 0 
+                ? ((strategy.successfulTrades / strategy.totalTrades) * 100).toFixed(1)
+                : "0.0"}%
+            </p>
           </div>
         </div>
 

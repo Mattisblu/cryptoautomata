@@ -305,9 +305,12 @@ function extractAlgorithmFromResponse(
   try {
     const parsed = JSON.parse(jsonString);
 
+    // Always generate a proper UUID - AI often returns placeholder IDs like "unique-uuid"
+    const algorithmId = randomUUID();
+    
     // Validate and create a proper algorithm structure
     const algorithm: TradingAlgorithm = {
-      id: parsed.id || randomUUID(),
+      id: algorithmId,
       name: parsed.name || "AI Generated Strategy",
       version: parsed.version || 1,
       createdAt: parsed.createdAt || Date.now(),
