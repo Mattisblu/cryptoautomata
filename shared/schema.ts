@@ -469,6 +469,7 @@ export interface TradeCycleState {
   symbol: string;
   startedAt?: number;
   algorithmId?: string;
+  sessionId?: string; // Links to running strategies table for tracking
   lastUpdate?: number;
 }
 

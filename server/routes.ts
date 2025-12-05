@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import { randomUUID } from "crypto";
 import { storage } from "./storage";
 import { exchangeService, createTickerStream } from "./exchangeService";
 import { analyzeAndRespond } from "./openai";
@@ -731,6 +732,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Generate a sessionId for tracking this trading session
+      const sessionId = randomUUID();
+
       // Start trading bot if algorithm available
       if (algorithm) {
         await tradingBot.start({
@@ -741,15 +745,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           optimizationMode: optMode,
           checkIntervalMs: mode === "ai-scalping" ? 2000 : 5000,
           onOptimizationSuggestion: (suggestion) => {
-            broadcast("optimizationSuggestion", suggestion);
+            broadcast("optimizationSuggestion", { ...suggestion, sessionId });
           },
           onMetricsUpdate: (metrics) => {
-            broadcast("liveMetrics", metrics);
+            broadcast("liveMetrics", { ...metrics, sessionId });
           },
           onAlgorithmUpdate: (algo) => {
-            broadcast("algorithmUpdate", algo);
+            broadcast("algorithmUpdate", { algorithm: algo, sessionId });
           },
         });
+
+        // Register this strategy in the running strategies table so it shows on the Strategies page
+        await storage.createRunningStrategy({
+          sessionId,
+          algorithmId: algorithm.id,
+          algorithmName: algorithm.name,
+          algorithmVersion: algorithm.version,
+          exchange: exchangeName,
+          symbol,
+          executionMode: execMode,
+          optimizationMode: optMode,
+          status: "running",
+          totalTrades: 0,
+          successfulTrades: 0,
+          totalPnl: 0,
+        });
+
+        // Broadcast that a strategy started
+        const strategy = await storage.getRunningStrategy(sessionId);
+        broadcast("strategyStarted", strategy);
       }
 
       const state: TradeCycleState = {
@@ -761,6 +785,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         symbol,
         startedAt: Date.now(),
         algorithmId: algorithm?.id,
+        sessionId, // Include sessionId in state for tracking
       };
 
       await storage.setTradeCycleState(state);
@@ -786,6 +811,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
         await storage.setTradeCycleState(newState);
         broadcast("tradeCycle", newState);
+
+        // Also update the running strategy status in database
+        if (currentState.sessionId) {
+          await storage.updateRunningStrategy(currentState.sessionId, { status: "paused" });
+          const strategy = await storage.getRunningStrategy(currentState.sessionId);
+          broadcast("strategyUpdated", strategy);
+        }
+
         res.json({ success: true, state: newState });
       } else {
         res.status(400).json({ success: false, error: "No active trading session" });
@@ -809,6 +842,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
         await storage.setTradeCycleState(newState);
         broadcast("tradeCycle", newState);
+
+        // Also update the running strategy status in database
+        if (currentState.sessionId) {
+          await storage.updateRunningStrategy(currentState.sessionId, { status: "running" });
+          const strategy = await storage.getRunningStrategy(currentState.sessionId);
+          broadcast("strategyUpdated", strategy);
+        }
+
         res.json({ success: true, state: newState });
       } else {
         res.status(400).json({ success: false, error: "No active trading session" });
@@ -826,6 +867,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const currentState = await storage.getTradeCycleState();
       const exchange = currentState?.exchange || "coinstore";
+
+      // Stop the running strategy in database
+      if (currentState?.sessionId) {
+        await storage.stopRunningStrategy(currentState.sessionId);
+        broadcast("strategyStopped", { sessionId: currentState.sessionId });
+      }
 
       const newState: TradeCycleState = {
         status: "idle",
@@ -851,6 +898,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const currentState = await storage.getTradeCycleState();
       const exchange = currentState?.exchange || "coinstore";
+
+      // Stop the running strategy in database
+      if (currentState?.sessionId) {
+        await storage.stopRunningStrategy(currentState.sessionId);
+        broadcast("strategyStopped", { sessionId: currentState.sessionId });
+      }
 
       const newState: TradeCycleState = {
         status: "idle",
