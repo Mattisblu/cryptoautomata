@@ -1,6 +1,8 @@
-import { ArrowUp, ArrowDown, Minus, Activity, BarChart2, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowUp, ArrowDown, Minus, Activity, BarChart2, TrendingUp, TrendingDown, Radio, Wifi, AlertCircle } from "lucide-react";
 import { useTradingContext } from "@/lib/tradingContext";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function formatNumber(num: number, decimals: number = 2): string {
   if (num >= 1000000) {
@@ -26,7 +28,7 @@ function formatPrice(price: number): string {
 }
 
 export function TickerBar() {
-  const { ticker, selectedMarket, connectionState } = useTradingContext();
+  const { ticker, selectedMarket, connectionState, dataSource, dataError } = useTradingContext();
 
   if (!selectedMarket) {
     return (
@@ -123,20 +125,58 @@ export function TickerBar() {
         </div>
       </div>
 
-      {/* Connection indicator */}
-      <div className="flex items-center gap-2 shrink-0">
-        <div
-          className={cn(
-            "w-2 h-2 rounded-full",
-            connectionState.status === "connected" ? "bg-profit" : 
-            connectionState.status === "connecting" ? "bg-yellow-500 pulse-connecting" : 
-            "bg-loss"
-          )}
-        />
-        <span className="text-xs text-muted-foreground">
-          {connectionState.status === "connected" ? "Live" : 
-           connectionState.status === "connecting" ? "Connecting" : "Offline"}
-        </span>
+      {/* Data source and connection indicator */}
+      <div className="flex items-center gap-3 shrink-0">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge 
+              variant={dataSource === "live" ? "default" : "secondary"}
+              className={cn(
+                "gap-1 text-[10px] font-medium cursor-help",
+                dataSource === "live" 
+                  ? "bg-emerald-600/90 text-white hover:bg-emerald-600" 
+                  : "bg-amber-600/90 text-white hover:bg-amber-600"
+              )}
+              data-testid="badge-data-source"
+            >
+              {dataSource === "live" ? (
+                <><Radio className="h-3 w-3" />LIVE</>
+              ) : (
+                <>
+                  <Wifi className="h-3 w-3" />
+                  SIM
+                  {dataError && <AlertCircle className="h-3 w-3 ml-0.5" />}
+                </>
+              )}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            {dataSource === "live" ? (
+              <p className="text-xs">Connected to live exchange API</p>
+            ) : (
+              <div className="text-xs">
+                <p className="font-medium">Using simulated data</p>
+                {dataError && (
+                  <p className="text-amber-400 mt-1">{dataError}</p>
+                )}
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+        <div className="flex items-center gap-1.5">
+          <div
+            className={cn(
+              "w-2 h-2 rounded-full",
+              connectionState.status === "connected" ? "bg-profit" : 
+              connectionState.status === "connecting" ? "bg-yellow-500 pulse-connecting" : 
+              "bg-loss"
+            )}
+          />
+          <span className="text-xs text-muted-foreground">
+            {connectionState.status === "connected" ? "Connected" : 
+             connectionState.status === "connecting" ? "Connecting" : "Offline"}
+          </span>
+        </div>
       </div>
     </div>
   );

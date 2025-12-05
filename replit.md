@@ -8,6 +8,13 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: December 2024
 
 ## Recent Changes
+- **Live API Data Integration**: Real-time market data from exchange APIs with automatic fallback
+  - Created `coinstoreApi.ts` and `bydfiApi.ts` API client modules with HMAC-SHA256 authentication
+  - `exchangeService.ts` now tries live API first, falls back to simulation if API unavailable
+  - Data source indicator in TickerBar shows "LIVE" (green) or "SIM" (amber) badge
+  - WebSocket messages include `dataSource` field for real-time tracking
+  - Market data endpoints return `dataSource` in response for transparency
+  - Environment variable `USE_LIVE_API=false` can disable live API attempts
 - **Multi-Strategy Support**: Run multiple trading algorithms simultaneously on different markets
   - `StrategyOrchestrator` service manages multiple bot instances concurrently
   - Each strategy session has a unique `sessionId` with independent state tracking
@@ -69,7 +76,9 @@ server/
 ├── routes.ts          # API endpoints
 ├── storage.ts         # Data persistence (in-memory + database)
 ├── openai.ts          # AI integration (gpt-4o model)
-├── exchangeService.ts # Exchange API simulation (Coinstore + BYDFI)
+├── exchangeService.ts # Exchange API with live data + fallback to simulation
+├── coinstoreApi.ts    # Coinstore exchange API client
+├── bydfiApi.ts        # BYDFI exchange API client
 ├── tradingBot.ts      # Automated trading logic with optimization integration
 ├── strategyOrchestrator.ts # Multi-strategy management, runs multiple bot instances
 ├── strategyOptimizer.ts # Live strategy monitoring and AI-powered optimization

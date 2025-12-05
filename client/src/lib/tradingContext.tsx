@@ -63,6 +63,10 @@ interface TradingContextValue {
   setTicker: (ticker: Ticker | null) => void;
   klines: Kline[];
   setKlines: (klines: Kline[]) => void;
+  dataSource: "live" | "simulated";
+  setDataSource: (source: "live" | "simulated") => void;
+  dataError: string | null;
+  setDataError: (error: string | null) => void;
   
   // Positions & Orders
   positions: Position[];
@@ -139,6 +143,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   // Market data
   const [ticker, setTicker] = useState<Ticker | null>(null);
   const [klines, setKlines] = useState<Kline[]>([]);
+  const [dataSource, setDataSource] = useState<"live" | "simulated">("simulated");
+  const [dataError, setDataError] = useState<string | null>(null);
   
   // Positions & Orders
   const [positions, setPositions] = useState<Position[]>([]);
@@ -290,6 +296,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         setTicker,
         klines,
         setKlines,
+        dataSource,
+        setDataSource,
+        dataError,
+        setDataError,
         positions,
         setPositions,
         orders,

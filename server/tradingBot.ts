@@ -199,8 +199,8 @@ class TradingBot {
       // Try to get current price for this specific symbol
       let exitPrice = position.markPrice;
       try {
-        const ticker = await exchangeService.getTicker(exchange, position.symbol);
-        exitPrice = ticker.lastPrice || position.markPrice;
+        const tickerResult = await exchangeService.getTicker(exchange, position.symbol);
+        exitPrice = tickerResult.ticker.lastPrice || position.markPrice;
       } catch {
         // Use position's markPrice as fallback
       }
@@ -244,9 +244,11 @@ class TradingBot {
       // Get exchange-specific configuration
       const exchangeInfo = exchangeService.getExchangeInfo(exchange);
       
-      // Get current market data
-      const ticker = await exchangeService.getTicker(exchange, symbol);
-      const klines = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      // Get current market data - getTicker/getKlines now return result types
+      const tickerResult = await exchangeService.getTicker(exchange, symbol);
+      const klinesResult = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      const ticker = tickerResult.ticker;
+      const klines = klinesResult.klines;
       
       // Get current positions
       const credentials = await storage.getCredentials(exchange);
@@ -596,9 +598,9 @@ class TradingBot {
 
       if (decision.action === "buy" || decision.action === "sell") {
         // Calculate position size based on risk management
-        // Get market-specific max leverage
-        const markets = await exchangeService.getMarkets(exchange);
-        const market = markets.find(m => m.symbol === symbol);
+        // Get market-specific max leverage - getMarkets now returns MarketsResult
+        const marketsResult = await exchangeService.getMarkets(exchange);
+        const market = marketsResult.markets.find(m => m.symbol === symbol);
         const marketMaxLeverage = market?.maxLeverage || exchangeInfo.maxLeverage;
         
         // Use the minimum of algorithm, exchange-wide, and market-specific leverage limits

@@ -51,23 +51,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const stream = createTickerStream(
             data.exchange as Exchange,
             data.symbol,
-            (ticker) => {
+            (streamData) => {
               if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "ticker", data: ticker }));
+                ws.send(JSON.stringify({ 
+                  type: "ticker", 
+                  data: streamData.ticker,
+                  dataSource: streamData.dataSource,
+                  ...(streamData.dataError ? { dataError: streamData.dataError } : {})
+                }));
               }
             }
           );
           tickerStreams.set(streamKey, stream);
 
-          // Send initial klines
-          const klines = await exchangeService.getKlines(
+          // Send initial klines - getKlines now returns KlinesResult with data source embedded
+          const klinesResult = await exchangeService.getKlines(
             data.exchange as Exchange,
             data.symbol,
             data.timeframe || "15m",
             100
           );
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "klines", data: klines }));
+            ws.send(JSON.stringify({ 
+              type: "klines", 
+              data: klinesResult.klines,
+              dataSource: klinesResult.dataSource,
+              ...(klinesResult.dataError ? { dataError: klinesResult.dataError } : {})
+            }));
           }
         }
       } catch (error) {
@@ -155,10 +165,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ success: false, error: "Exchange required" });
       }
 
-      const markets = await exchangeService.getMarkets(exchange);
-      await storage.setMarkets(exchange, markets);
+      // getMarkets now returns MarketsResult with data source embedded
+      const result = await exchangeService.getMarkets(exchange);
+      await storage.setMarkets(exchange, result.markets);
 
-      res.json({ success: true, exchange, markets });
+      res.json({ 
+        success: true, 
+        exchange, 
+        markets: result.markets, 
+        dataSource: result.dataSource,
+        ...(result.dataError ? { dataError: result.dataError } : {})
+      });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
@@ -173,10 +190,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ success: false, error: "Exchange and symbol required" });
       }
 
-      const ticker = await exchangeService.getTicker(exchange, symbol);
-      await storage.setTicker(exchange, symbol, ticker);
+      // getTicker now returns TickerResult with data source embedded
+      const result = await exchangeService.getTicker(exchange, symbol);
+      await storage.setTicker(exchange, symbol, result.ticker);
 
-      res.json({ success: true, ticker });
+      res.json({ 
+        success: true, 
+        ticker: result.ticker, 
+        dataSource: result.dataSource,
+        ...(result.dataError ? { dataError: result.dataError } : {})
+      });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
@@ -193,10 +216,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ success: false, error: "Exchange and symbol required" });
       }
 
-      const klines = await exchangeService.getKlines(exchange, symbol, timeframe, limit);
-      await storage.setKlines(exchange, symbol, timeframe, klines);
+      // getKlines now returns KlinesResult with data source embedded
+      const result = await exchangeService.getKlines(exchange, symbol, timeframe, limit);
+      await storage.setKlines(exchange, symbol, timeframe, result.klines);
 
-      res.json({ success: true, klines });
+      res.json({ 
+        success: true, 
+        klines: result.klines, 
+        dataSource: result.dataSource,
+        ...(result.dataError ? { dataError: result.dataError } : {})
+      });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }

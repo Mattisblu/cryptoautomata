@@ -9,6 +9,8 @@ export function useWebSocket() {
     timeframe,
     setTicker,
     setKlines,
+    setDataSource,
+    setDataError,
     setTradeCycleState,
     orders,
     setOrders,
@@ -71,6 +73,12 @@ export function useWebSocket() {
           switch (message.type) {
             case "ticker":
               setTicker(message.data as Ticker);
+              if (message.dataSource) {
+                setDataSource(message.dataSource as "live" | "simulated");
+              }
+              if (message.dataError !== undefined) {
+                setDataError(message.dataError || null);
+              }
               setConnectionState({
                 status: "connected",
                 exchange: selectedExchange || "coinstore",
@@ -80,6 +88,12 @@ export function useWebSocket() {
 
             case "klines":
               setKlines(message.data as Kline[]);
+              if (message.dataSource) {
+                setDataSource(message.dataSource as "live" | "simulated");
+              }
+              if (message.dataError !== undefined) {
+                setDataError(message.dataError || null);
+              }
               break;
 
             case "tradeCycle":
@@ -146,7 +160,7 @@ export function useWebSocket() {
     } catch (error) {
       console.error("WebSocket connection failed:", error);
     }
-  }, [selectedExchange, selectedMarket, timeframe, setTicker, setKlines, setTradeCycleState, setOrders, setPositions, setConnectionState]);
+  }, [selectedExchange, selectedMarket, timeframe, setTicker, setKlines, setDataSource, setDataError, setTradeCycleState, setOrders, setPositions, setConnectionState]);
 
   const subscribe = useCallback(
     (symbol: string, timeframe: string = "15m") => {

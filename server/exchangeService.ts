@@ -1,5 +1,10 @@
 import type { Exchange, Market, Ticker, Kline, Position, Order, ApiCredentials } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { getCoinstoreContracts, getCoinstoreTicker, getCoinstoreKlines, validateCoinstoreCredentials } from "./coinstoreApi";
+import { getBydfiMarkets, getBydfiTicker, getBydfiKlines, validateBydfiCredentials } from "./bydfiApi";
+
+// Flag to enable/disable live API (can be controlled via environment)
+const USE_LIVE_API = process.env.USE_LIVE_API !== "false";
 
 // Exchange-specific configurations
 const EXCHANGE_CONFIG: Record<Exchange, {
@@ -50,8 +55,8 @@ const EXCHANGE_CONFIG: Record<Exchange, {
   },
 };
 
-// Comprehensive market listings per exchange
-const MOCK_MARKETS: Record<Exchange, Market[]> = {
+// Fallback market listings (used when live API is unavailable)
+const FALLBACK_MARKETS: Record<Exchange, Market[]> = {
   coinstore: [
     { symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", pricePrecision: 2, quantityPrecision: 6, maxLeverage: 100 },
     { symbol: "ETHUSDT", baseAsset: "ETH", quoteAsset: "USDT", pricePrecision: 2, quantityPrecision: 5, maxLeverage: 75 },
@@ -78,14 +83,44 @@ const MOCK_MARKETS: Record<Exchange, Market[]> = {
   ],
 };
 
+// Cache for markets from live API
+const marketsCache: Map<Exchange, { markets: Market[]; timestamp: number }> = new Map();
+const MARKETS_CACHE_TTL = 300000; // 5 minutes
+
 // Price cache to maintain consistency across calls
 const priceCache: Map<string, { price: number; lastUpdate: number }> = new Map();
 
+// Data source type
+export type DataSource = "live" | "simulated";
+
+// Internal tracking for debugging (not used by callers - they use return values)
+let lastDataSource: DataSource = "simulated";
+let lastDataError: string | undefined;
+
+// Result types that include data source info
+export interface TickerResult {
+  ticker: Ticker;
+  dataSource: DataSource;
+  dataError?: string;
+}
+
+export interface KlinesResult {
+  klines: Kline[];
+  dataSource: DataSource;
+  dataError?: string;
+}
+
+export interface MarketsResult {
+  markets: Market[];
+  dataSource: DataSource;
+  dataError?: string;
+}
+
 interface ExchangeService {
   validateCredentials(credentials: ApiCredentials): Promise<boolean>;
-  getMarkets(exchange: Exchange): Promise<Market[]>;
-  getTicker(exchange: Exchange, symbol: string): Promise<Ticker>;
-  getKlines(exchange: Exchange, symbol: string, timeframe: string, limit?: number): Promise<Kline[]>;
+  getMarkets(exchange: Exchange): Promise<MarketsResult>;
+  getTicker(exchange: Exchange, symbol: string): Promise<TickerResult>;
+  getKlines(exchange: Exchange, symbol: string, timeframe: string, limit?: number): Promise<KlinesResult>;
   getPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]>;
   getOrders(exchange: Exchange, credentials: ApiCredentials): Promise<Order[]>;
   placeOrder(exchange: Exchange, credentials: ApiCredentials, order: Partial<Order>): Promise<Order>;
@@ -95,7 +130,7 @@ interface ExchangeService {
   getExchangeInfo(exchange: Exchange): typeof EXCHANGE_CONFIG[Exchange];
 }
 
-// Base prices for all supported assets
+// Base prices for fallback simulation
 const BASE_PRICES: Record<string, number> = {
   BTCUSDT: 95000,
   ETHUSDT: 3500,
@@ -112,7 +147,7 @@ const BASE_PRICES: Record<string, number> = {
   APTUSDT: 9.2,
 };
 
-// Get current price with realistic movement
+// Get current price with realistic movement (fallback)
 function getCurrentPrice(exchange: Exchange, symbol: string): number {
   const cacheKey = `${exchange}:${symbol}`;
   const cached = priceCache.get(cacheKey);
@@ -123,26 +158,23 @@ function getCurrentPrice(exchange: Exchange, symbol: string): number {
     return cached.price;
   }
   
-  // Apply small random movement from last price or base price
   const lastPrice = cached?.price || basePrice;
   const volatility = config.priceVolatility;
   const change = (Math.random() - 0.5) * 2 * volatility;
   const newPrice = lastPrice * (1 + change);
   
-  // Ensure price stays within reasonable bounds (80% to 120% of base)
   const clampedPrice = Math.max(basePrice * 0.8, Math.min(basePrice * 1.2, newPrice));
   
   priceCache.set(cacheKey, { price: clampedPrice, lastUpdate: Date.now() });
   return clampedPrice;
 }
 
-// Generate mock ticker data with exchange-specific characteristics
-function generateMockTicker(exchange: Exchange, symbol: string): Ticker {
+// Generate simulated ticker data (fallback)
+function generateSimulatedTicker(exchange: Exchange, symbol: string): Ticker {
   const currentPrice = getCurrentPrice(exchange, symbol);
   const basePrice = BASE_PRICES[symbol] || 100;
   const change = (currentPrice - basePrice) / basePrice;
   
-  // BYDFI tends to have higher volume
   const volumeMultiplier = exchange === "bydfi" ? 1.5 : 1.0;
   
   return {
@@ -157,19 +189,18 @@ function generateMockTicker(exchange: Exchange, symbol: string): Ticker {
   };
 }
 
-// Generate mock klines with exchange-specific volatility
-function generateMockKlines(exchange: Exchange, symbol: string, timeframe: string, limit: number = 100): Kline[] {
+// Generate simulated klines (fallback)
+function generateSimulatedKlines(exchange: Exchange, symbol: string, timeframe: string, limit: number = 100): Kline[] {
   const klines: Kline[] = [];
   const config = EXCHANGE_CONFIG[exchange];
   const timeframeMs = getTimeframeMs(timeframe);
   const now = Date.now();
   
-  // Start from a base price and work forward
   let price = (BASE_PRICES[symbol] || 100) * (0.95 + Math.random() * 0.1);
 
   for (let i = limit; i > 0; i--) {
     const volatility = config.priceVolatility + Math.random() * 0.005;
-    const trend = Math.random() - 0.48; // Slight upward bias
+    const trend = Math.random() - 0.48;
     
     const open = price;
     const changePercent = volatility * trend;
@@ -177,8 +208,7 @@ function generateMockKlines(exchange: Exchange, symbol: string, timeframe: strin
     const high = Math.max(open, close) * (1 + Math.random() * volatility);
     const low = Math.min(open, close) * (1 - Math.random() * volatility);
     
-    // Get precision for this market
-    const market = MOCK_MARKETS[exchange]?.find(m => m.symbol === symbol);
+    const market = FALLBACK_MARKETS[exchange]?.find(m => m.symbol === symbol);
     const precision = market?.pricePrecision || 4;
     
     klines.push({
@@ -217,55 +247,173 @@ function getStorageKey(exchange: Exchange, apiKey: string): string {
   return `${exchange}:${apiKey.slice(0, 8)}`;
 }
 
-// Exchange service implementation
+// Exchange service implementation with live API + fallback
 export const exchangeService: ExchangeService = {
   async validateCredentials(credentials: ApiCredentials): Promise<boolean> {
-    // Simulate exchange-specific validation time
-    const delay = credentials.exchange === "bydfi" ? 300 : 500;
-    await new Promise(resolve => setTimeout(resolve, delay + Math.random() * 200));
-    
     if (!credentials.apiKey || !credentials.secretKey) {
       return false;
     }
     
-    // BYDFI requires passphrase
-    if (credentials.exchange === "bydfi" && !credentials.passphrase) {
-      console.log("BYDFI requires passphrase for authentication");
-      // Still allow for development, but log warning
+    // For development/testing with test keys, always accept
+    if (credentials.apiKey.startsWith("test")) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      return true;
     }
     
     if (credentials.apiKey.startsWith("invalid")) {
       return false;
     }
     
+    // Try real API validation if credentials look real
+    if (USE_LIVE_API && credentials.apiKey.length > 10) {
+      try {
+        if (credentials.exchange === "coinstore") {
+          return await validateCoinstoreCredentials(credentials);
+        } else if (credentials.exchange === "bydfi") {
+          return await validateBydfiCredentials(credentials);
+        }
+      } catch (error) {
+        console.warn(`Live credential validation failed for ${credentials.exchange}, accepting for paper trading`);
+      }
+    }
+    
+    // Accept credentials for paper trading mode
     return true;
   },
 
-  async getMarkets(exchange: Exchange): Promise<Market[]> {
-    // BYDFI has faster API response
-    const delay = exchange === "bydfi" ? 100 : 200;
-    await new Promise(resolve => setTimeout(resolve, delay));
-    return MOCK_MARKETS[exchange] || [];
+  async getMarkets(exchange: Exchange): Promise<MarketsResult> {
+    // Check cache first
+    const cached = marketsCache.get(exchange);
+    if (cached && Date.now() - cached.timestamp < MARKETS_CACHE_TTL) {
+      return { markets: cached.markets, dataSource: "live" };
+    }
+    
+    if (USE_LIVE_API) {
+      try {
+        let liveMarkets: Market[] = [];
+        
+        if (exchange === "coinstore") {
+          liveMarkets = await getCoinstoreContracts();
+        } else if (exchange === "bydfi") {
+          liveMarkets = await getBydfiMarkets();
+        }
+        
+        if (liveMarkets.length > 0) {
+          console.log(`[${exchange.toUpperCase()}] Fetched ${liveMarkets.length} markets from live API`);
+          marketsCache.set(exchange, { markets: liveMarkets, timestamp: Date.now() });
+          lastDataSource = "live";
+          return { markets: liveMarkets, dataSource: "live" };
+        }
+      } catch (error) {
+        console.warn(`[${exchange.toUpperCase()}] Live markets API failed, using fallback:`, error);
+      }
+    }
+    
+    // Fallback to static markets
+    lastDataSource = "simulated";
+    return { markets: FALLBACK_MARKETS[exchange] || [], dataSource: "simulated" };
   },
 
-  async getTicker(exchange: Exchange, symbol: string): Promise<Ticker> {
-    await new Promise(resolve => setTimeout(resolve, 30 + Math.random() * 30));
-    return generateMockTicker(exchange, symbol);
+  async getTicker(exchange: Exchange, symbol: string): Promise<TickerResult> {
+    let dataError: string | undefined;
+    
+    if (USE_LIVE_API) {
+      try {
+        if (exchange === "coinstore") {
+          const result = await getCoinstoreTicker(symbol);
+          if (result.success && result.data && result.data.lastPrice > 0) {
+            const cacheKey = `${exchange}:${symbol}`;
+            priceCache.set(cacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
+            lastDataSource = "live";
+            lastDataError = undefined;
+            console.log(`[COINSTORE] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
+            return { ticker: result.data, dataSource: "live" };
+          } else if (!result.success) {
+            console.warn(`[COINSTORE] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
+            dataError = result.error;
+            lastDataError = result.error;
+          }
+        } else if (exchange === "bydfi") {
+          const result = await getBydfiTicker(symbol);
+          if (result.success && result.data && result.data.lastPrice > 0) {
+            const cacheKey = `${exchange}:${symbol}`;
+            priceCache.set(cacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
+            lastDataSource = "live";
+            lastDataError = undefined;
+            console.log(`[BYDFI] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
+            return { ticker: result.data, dataSource: "live" };
+          } else if (!result.success) {
+            console.warn(`[BYDFI] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
+            dataError = result.error;
+            lastDataError = result.error;
+          }
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        console.warn(`[${exchange.toUpperCase()}] Live ticker API exception for ${symbol}: ${errorMsg}`);
+        dataError = errorMsg;
+        lastDataError = errorMsg;
+      }
+    }
+    
+    // Fallback to simulated ticker
+    lastDataSource = "simulated";
+    const ticker = generateSimulatedTicker(exchange, symbol);
+    return { ticker, dataSource: "simulated", dataError };
   },
 
-  async getKlines(exchange: Exchange, symbol: string, timeframe: string, limit: number = 100): Promise<Kline[]> {
-    await new Promise(resolve => setTimeout(resolve, 80 + Math.random() * 50));
-    return generateMockKlines(exchange, symbol, timeframe, limit);
+  async getKlines(exchange: Exchange, symbol: string, timeframe: string, limit: number = 100): Promise<KlinesResult> {
+    let dataError: string | undefined;
+    
+    if (USE_LIVE_API) {
+      try {
+        if (exchange === "coinstore") {
+          const result = await getCoinstoreKlines(symbol, timeframe, limit);
+          if (result.success && result.data && result.data.length > 0) {
+            lastDataSource = "live";
+            lastDataError = undefined;
+            console.log(`[COINSTORE] Live klines for ${symbol}: ${result.data.length} candles`);
+            return { klines: result.data, dataSource: "live" };
+          } else if (!result.success) {
+            console.warn(`[COINSTORE] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
+            dataError = result.error;
+            lastDataError = result.error;
+          }
+        } else if (exchange === "bydfi") {
+          const result = await getBydfiKlines(symbol, timeframe, limit);
+          if (result.success && result.data && result.data.length > 0) {
+            lastDataSource = "live";
+            lastDataError = undefined;
+            console.log(`[BYDFI] Live klines for ${symbol}: ${result.data.length} candles`);
+            return { klines: result.data, dataSource: "live" };
+          } else if (!result.success) {
+            console.warn(`[BYDFI] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
+            dataError = result.error;
+            lastDataError = result.error;
+          }
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        console.warn(`[${exchange.toUpperCase()}] Live klines API exception for ${symbol}: ${errorMsg}`);
+        dataError = errorMsg;
+        lastDataError = errorMsg;
+      }
+    }
+    
+    // Fallback to simulated klines
+    lastDataSource = "simulated";
+    const klines = generateSimulatedKlines(exchange, symbol, timeframe, limit);
+    return { klines, dataSource: "simulated", dataError };
   },
 
   async getPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]> {
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Positions are managed locally for paper trading
+    // Real trading would use exchange API
     const key = getStorageKey(exchange, credentials.apiKey);
     return simulatedPositions.get(key) || [];
   },
 
   async getOrders(exchange: Exchange, credentials: ApiCredentials): Promise<Order[]> {
-    await new Promise(resolve => setTimeout(resolve, 50));
     const key = getStorageKey(exchange, credentials.apiKey);
     return simulatedOrders.get(key) || [];
   },
@@ -276,10 +424,6 @@ export const exchangeService: ExchangeService = {
     const config = EXCHANGE_CONFIG[exchange];
     const symbol = orderParams.symbol || "BTCUSDT";
     const currentPrice = getCurrentPrice(exchange, symbol);
-    const market = MOCK_MARKETS[exchange]?.find(m => m.symbol === symbol);
-    
-    // Apply exchange-specific fees
-    const fee = orderParams.type === "market" ? config.takerFee : config.makerFee;
     
     const order: Order = {
       id: randomUUID(),
@@ -295,29 +439,24 @@ export const exchangeService: ExchangeService = {
       timestamp: Date.now(),
     };
 
-    // Store the order
     const key = getStorageKey(exchange, credentials.apiKey);
     const orders = simulatedOrders.get(key) || [];
     orders.push(order);
     simulatedOrders.set(key, orders);
 
-    // If market order filled, create/update position
     if (order.status === "filled") {
       const positions = simulatedPositions.get(key) || [];
       const existingPosition = positions.find(p => p.symbol === symbol);
       
       if (existingPosition) {
-        // Update existing position
         if ((existingPosition.side === "long" && order.side === "buy") ||
             (existingPosition.side === "short" && order.side === "sell")) {
-          // Adding to position
           const totalQuantity = existingPosition.quantity + order.quantity;
           const avgPrice = (existingPosition.entryPrice * existingPosition.quantity + 
                           order.price * order.quantity) / totalQuantity;
           existingPosition.quantity = totalQuantity;
           existingPosition.entryPrice = avgPrice;
         } else {
-          // Reducing/closing position
           existingPosition.quantity -= order.quantity;
           if (existingPosition.quantity <= 0) {
             const idx = positions.indexOf(existingPosition);
@@ -325,8 +464,7 @@ export const exchangeService: ExchangeService = {
           }
         }
       } else {
-        // Create new position
-        const leverage = 10; // Default leverage
+        const leverage = 10;
         const position: Position = {
           id: randomUUID(),
           symbol,
@@ -377,7 +515,6 @@ export const exchangeService: ExchangeService = {
     if (idx >= 0) {
       const position = positions[idx];
       
-      // Create closing order
       const closingOrder: Order = {
         id: randomUUID(),
         symbol: position.symbol,
@@ -421,17 +558,36 @@ export const exchangeService: ExchangeService = {
   },
 };
 
+// Ticker stream callback with data source info (same as TickerResult)
+export interface TickerStreamData {
+  ticker: Ticker;
+  dataSource: DataSource;
+  dataError?: string;
+}
+
 // Function to continuously update ticker data (for WebSocket simulation)
 export function createTickerStream(
   exchange: Exchange,
   symbol: string,
-  callback: (ticker: Ticker) => void,
+  callback: (data: TickerStreamData) => void,
   intervalMs: number = 1000
 ): { stop: () => void } {
-  const interval = setInterval(() => {
-    const ticker = generateMockTicker(exchange, symbol);
-    callback(ticker);
-  }, intervalMs);
+  const fetchTicker = async () => {
+    try {
+      // getTicker now returns TickerResult with data source embedded
+      const result = await exchangeService.getTicker(exchange, symbol);
+      callback({ 
+        ticker: result.ticker, 
+        dataSource: result.dataSource,
+        ...(result.dataError ? { dataError: result.dataError } : {})
+      });
+    } catch (error) {
+      console.error("Ticker stream error:", error);
+    }
+  };
+
+  fetchTicker();
+  const interval = setInterval(fetchTicker, intervalMs);
 
   return {
     stop: () => clearInterval(interval),

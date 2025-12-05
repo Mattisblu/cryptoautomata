@@ -145,9 +145,11 @@ class StrategyOptimizer {
     try {
       const { exchange, symbol, algorithm, optimizationMode } = this.config;
 
-      // Get current market data
-      const ticker = await exchangeService.getTicker(exchange, symbol);
-      const klines = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      // Get current market data - getTicker/getKlines now return result types
+      const tickerResult = await exchangeService.getTicker(exchange, symbol);
+      const klinesResult = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      const ticker = tickerResult.ticker;
+      const klines = klinesResult.klines;
       const positions = await storage.getPositions(exchange);
 
       // Calculate performance metrics

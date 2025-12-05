@@ -287,8 +287,11 @@ class StrategyOrchestrator {
       const { exchange, symbol, algorithm, executionMode } = instance;
       
       const exchangeInfo = exchangeService.getExchangeInfo(exchange);
-      const ticker = await exchangeService.getTicker(exchange, symbol);
-      const klines = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      // getTicker/getKlines now return result types with data source embedded
+      const tickerResult = await exchangeService.getTicker(exchange, symbol);
+      const klinesResult = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      const ticker = tickerResult.ticker;
+      const klines = klinesResult.klines;
       
       const credentials = await storage.getCredentials(exchange);
       if (!credentials) return;
@@ -403,8 +406,9 @@ class StrategyOrchestrator {
       instance.totalTrades++;
 
       if (decision.action === "buy" || decision.action === "sell") {
-        const markets = await exchangeService.getMarkets(exchange);
-        const market = markets.find(m => m.symbol === symbol);
+        // getMarkets now returns MarketsResult with data source embedded
+        const marketsResult = await exchangeService.getMarkets(exchange);
+        const market = marketsResult.markets.find(m => m.symbol === symbol);
         const marketMaxLeverage = market?.maxLeverage || exchangeInfo.maxLeverage;
         
         const effectiveLeverage = Math.min(
