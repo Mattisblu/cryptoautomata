@@ -87,7 +87,6 @@ export function useWebSocket() {
               break;
 
             case "klines":
-              console.log("[WebSocket] Received klines:", message.data?.length, "candles");
               setKlines(message.data as Kline[]);
               if (message.dataSource) {
                 setDataSource(message.dataSource as "live" | "simulated");

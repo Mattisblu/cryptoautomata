@@ -20,6 +20,7 @@ export function KlineChart() {
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [chartReady, setChartReady] = useState(false);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -69,6 +70,7 @@ export function KlineChart() {
 
     chartRef.current = chart;
     seriesRef.current = candlestickSeries;
+    setChartReady(true);
 
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
@@ -85,13 +87,15 @@ export function KlineChart() {
     return () => {
       window.removeEventListener("resize", handleResize);
       chart.remove();
+      setChartReady(false);
     };
   }, [theme]);
 
-  // Update chart data when klines change
+  // Update chart data when klines change or chart becomes ready
   useEffect(() => {
-    console.log("[KlineChart] klines changed:", klines.length, "candles, seriesRef:", !!seriesRef.current);
-    if (seriesRef.current && klines.length > 0) {
+    if (!chartReady || !seriesRef.current) return;
+    
+    if (klines.length > 0) {
       const chartData: CandlestickData<Time>[] = klines.map((k) => ({
         time: (k.time / 1000) as Time,
         open: k.open,
@@ -99,11 +103,10 @@ export function KlineChart() {
         low: k.low,
         close: k.close,
       }));
-      console.log("[KlineChart] Setting chart data:", chartData.length, "candles");
       seriesRef.current.setData(chartData);
       chartRef.current?.timeScale().fitContent();
     }
-  }, [klines]);
+  }, [klines, chartReady]);
 
   if (!selectedMarket) {
     return (
