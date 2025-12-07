@@ -68,14 +68,47 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   
+  const defaultHeaders: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+  };
+  
   try {
     const response = await fetch(url, {
       ...options,
+      headers: {
+        ...defaultHeaders,
+        ...(options.headers || {}),
+      },
       signal: controller.signal,
     });
     return response;
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function safeParseJson<T>(response: Response): Promise<{ data: T | null; error: string | null }> {
+  const text = await response.text();
+  
+  if (text.startsWith("<!") || text.startsWith("<html") || text.includes("<!DOCTYPE")) {
+    console.error("[Bitunex API] Received HTML instead of JSON - likely Cloudflare protection");
+    return {
+      data: null,
+      error: "API returned HTML (Cloudflare protection active). Please try again later.",
+    };
+  }
+  
+  try {
+    return { data: JSON.parse(text) as T, error: null };
+  } catch (e) {
+    console.error("[Bitunex API] JSON parse error:", text.substring(0, 200));
+    return {
+      data: null,
+      error: `Invalid JSON response: ${text.substring(0, 100)}`,
+    };
   }
 }
 
@@ -88,7 +121,12 @@ export async function getBitunexMarkets(): Promise<Market[]> {
       return [];
     }
     
-    const data = await response.json();
+    const { data, error } = await safeParseJson<any>(response);
+    
+    if (error || !data) {
+      console.error("Bitunex markets parse error:", error);
+      return [];
+    }
     
     if (!data.data?.symbols) {
       console.error("Bitunex markets response error:", data.msg || "No symbols data");
@@ -124,7 +162,16 @@ export async function getBitunexTicker(symbol: string): Promise<ApiResult<Ticker
       };
     }
     
-    const responseData: BitunexResponse<BitunexTicker> = await response.json();
+    const { data: responseData, error: parseError } = await safeParseJson<BitunexResponse<BitunexTicker>>(response);
+    
+    if (parseError || !responseData) {
+      return {
+        success: false,
+        data: null,
+        error: parseError || "Failed to parse response",
+        errorCode: "PARSE_ERROR",
+      };
+    }
     
     if (responseData.code !== "0" || !responseData.data) {
       return {
@@ -180,7 +227,16 @@ export async function getBitunexKlines(
       };
     }
     
-    const responseData: BitunexResponse<BitunexKline[]> = await response.json();
+    const { data: responseData, error: parseError } = await safeParseJson<BitunexResponse<BitunexKline[]>>(response);
+    
+    if (parseError || !responseData) {
+      return {
+        success: false,
+        data: null,
+        error: parseError || "Failed to parse response",
+        errorCode: "PARSE_ERROR",
+      };
+    }
     
     if (responseData.code !== "0" || !responseData.data || responseData.data.length === 0) {
       return {
