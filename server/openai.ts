@@ -272,7 +272,6 @@ function extractAlgorithmFromResponse(
   response: string,
   context: MarketContext
 ): TradingAlgorithm | undefined {
-  // Try multiple patterns to find JSON algorithm
   let jsonString: string | undefined;
   
   // Pattern 1: ```json code block
@@ -289,11 +288,32 @@ function extractAlgorithmFromResponse(
     }
   }
   
-  // Pattern 3: Raw JSON object with algorithm structure
+  // Pattern 3: Raw JSON object with algorithm structure (more flexible)
   if (!jsonString) {
-    const jsonObjectMatch = response.match(/\{\s*"(?:id|name)"[\s\S]*?"rules"\s*:\s*\[[\s\S]*?\]\s*,[\s\S]*?"riskManagement"[\s\S]*?\}/);
+    const jsonObjectMatch = response.match(/\{[\s\S]*?"name"[\s\S]*?"rules"\s*:\s*\[[\s\S]*?\][\s\S]*?"riskManagement"[\s\S]*?\}/);
     if (jsonObjectMatch) {
       jsonString = jsonObjectMatch[0];
+    }
+  }
+  
+  // Pattern 4: Find any balanced JSON object containing "rules" array
+  if (!jsonString) {
+    const startIdx = response.indexOf('{"');
+    if (startIdx !== -1 && response.includes('"rules"')) {
+      let braceCount = 0;
+      let endIdx = startIdx;
+      for (let i = startIdx; i < response.length; i++) {
+        if (response[i] === '{') braceCount++;
+        if (response[i] === '}') braceCount--;
+        if (braceCount === 0) {
+          endIdx = i + 1;
+          break;
+        }
+      }
+      const candidate = response.substring(startIdx, endIdx);
+      if (candidate.includes('"rules"') && candidate.includes('"riskManagement"')) {
+        jsonString = candidate;
+      }
     }
   }
   
@@ -301,6 +321,13 @@ function extractAlgorithmFromResponse(
     console.log("No algorithm JSON found in response");
     return undefined;
   }
+
+  // Clean up common JSON issues from AI responses
+  jsonString = jsonString
+    .replace(/,\s*}/g, '}')  // Remove trailing commas before }
+    .replace(/,\s*]/g, ']')  // Remove trailing commas before ]
+    .replace(/[\x00-\x1F\x7F]/g, ' ')  // Remove control characters
+    .trim();
 
   try {
     const parsed = JSON.parse(jsonString);
