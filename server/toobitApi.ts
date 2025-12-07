@@ -259,8 +259,6 @@ export async function validateToobitCredentials(credentials: ApiCredentials): Pr
     const { queryString, headers } = createToobitSignedParams(credentials);
     const url = `${TOOBIT_BASE_URL}/api/v1/spot/account?${queryString}`;
     
-    console.log(`[TOOBIT] Validating credentials at ${url}`);
-    
     const response = await fetchWithTimeout(url, {
       method: "GET",
       headers,
