@@ -353,8 +353,8 @@ export function AIChatbot() {
   }, [chatMessages]);
 
   return (
-    <Card className="flex flex-col h-full" data-testid="ai-chatbot">
-      <CardHeader className="pb-3 flex-shrink-0">
+    <Card className="flex flex-col h-full overflow-hidden" data-testid="ai-chatbot">
+      <CardHeader className="pb-3 flex-shrink-0 border-b">
         <div className="flex items-center justify-between gap-4">
           <CardTitle className="text-base flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
@@ -379,7 +379,7 @@ export function AIChatbot() {
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 flex flex-col p-0 min-h-0">
+      <CardContent className="flex-1 flex flex-col p-0 min-h-0 overflow-hidden">
         {/* Messages Area */}
         <ScrollArea ref={scrollAreaRef} className="flex-1 px-4">
           {chatMessages.length === 0 ? (

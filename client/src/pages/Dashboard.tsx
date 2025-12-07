@@ -20,6 +20,7 @@ import { useTradingContext } from "@/lib/tradingContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useQuery } from "@tanstack/react-query";
 import { Bot, BarChart3, Code, ExternalLink, PanelRightOpen, PanelRightClose, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import type { Position, Order, Kline } from "@shared/schema";
@@ -35,6 +36,14 @@ export default function Dashboard() {
   } = useTradingContext();
   const isManualMode = tradingMode === "manual";
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<"settings" | "chat">("settings");
+
+  // Reset to settings tab when switching to manual mode (chat tab is hidden in manual)
+  useEffect(() => {
+    if (isManualMode && sidebarTab === "chat") {
+      setSidebarTab("settings");
+    }
+  }, [isManualMode, sidebarTab]);
 
   // Connect to WebSocket for real-time updates
   useWebSocket();
@@ -171,26 +180,61 @@ export default function Dashboard() {
 
         {/* Right Column - Desktop Sidebar (hidden on mobile/tablet) */}
         <div className="hidden xl:flex w-[380px] border-l bg-card/30 flex-col overflow-hidden">
-          <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading max-h-[calc(100vh-450px)]">
-            {/* Credentials */}
-            <CredentialsForm />
-
-            {/* API Status Window */}
-            <APIStatusWindow />
-
-            {/* Algorithm Status (AI modes only) */}
-            {!isManualMode && <AlgorithmStatus />}
-
-            {/* Risk Parameters (AI modes only) */}
-            {!isManualMode && <RiskParametersCard />}
-
-            {/* Manual Trading Panel (Manual mode only) */}
-            {isManualMode && <ManualTradingPanel />}
+          {/* Sidebar Tabs */}
+          <div className="flex-shrink-0 border-b bg-card/50">
+            <div className="flex">
+              <button
+                onClick={() => setSidebarTab("settings")}
+                className={cn(
+                  "flex-1 px-4 py-2.5 text-sm font-medium transition-colors",
+                  sidebarTab === "settings" 
+                    ? "border-b-2 border-primary text-foreground" 
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                data-testid="tab-settings"
+              >
+                Settings
+              </button>
+              {!isManualMode && (
+                <button
+                  onClick={() => setSidebarTab("chat")}
+                  className={cn(
+                    "flex-1 px-4 py-2.5 text-sm font-medium transition-colors",
+                    sidebarTab === "chat" 
+                      ? "border-b-2 border-primary text-foreground" 
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  data-testid="tab-chat"
+                >
+                  AI Chat
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* AI Chatbot (AI modes only) */}
-          {!isManualMode && (
-            <div className="flex-1 min-h-[300px] border-t overflow-hidden">
+          {/* Settings Tab Content */}
+          {sidebarTab === "settings" && (
+            <div className="flex-1 overflow-y-auto scrollbar-trading p-4 space-y-4">
+              {/* Credentials */}
+              <CredentialsForm />
+
+              {/* API Status Window */}
+              <APIStatusWindow />
+
+              {/* Algorithm Status (AI modes only) */}
+              {!isManualMode && <AlgorithmStatus />}
+
+              {/* Risk Parameters (AI modes only) */}
+              {!isManualMode && <RiskParametersCard />}
+
+              {/* Manual Trading Panel (Manual mode only) */}
+              {isManualMode && <ManualTradingPanel />}
+            </div>
+          )}
+
+          {/* Chat Tab Content (AI modes only) */}
+          {sidebarTab === "chat" && !isManualMode && (
+            <div className="flex-1 overflow-hidden flex flex-col">
               <AIChatbot />
             </div>
           )}
@@ -208,28 +252,64 @@ export default function Dashboard() {
                 <PanelRightOpen className="h-6 w-6" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-full sm:w-[400px] p-0 flex flex-col">
+            <SheetContent side="right" className="w-full sm:w-[400px] p-0 flex flex-col h-full">
               <SheetTitle className="sr-only">Trading Panel</SheetTitle>
-              <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading">
-                {/* Credentials */}
-                <CredentialsForm />
-
-                {/* API Status Window */}
-                <APIStatusWindow />
-
-                {/* Algorithm Status (AI modes only) */}
-                {!isManualMode && <AlgorithmStatus />}
-
-                {/* Risk Parameters (AI modes only) */}
-                {!isManualMode && <RiskParametersCard />}
-
-                {/* Manual Trading Panel (Manual mode only) */}
-                {isManualMode && <ManualTradingPanel />}
+              
+              {/* Mobile Sidebar Tabs */}
+              <div className="flex-shrink-0 border-b bg-card/50">
+                <div className="flex">
+                  <button
+                    onClick={() => setSidebarTab("settings")}
+                    className={cn(
+                      "flex-1 px-4 py-3 text-sm font-medium transition-colors",
+                      sidebarTab === "settings" 
+                        ? "border-b-2 border-primary text-foreground" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    data-testid="mobile-tab-settings"
+                  >
+                    Settings
+                  </button>
+                  {!isManualMode && (
+                    <button
+                      onClick={() => setSidebarTab("chat")}
+                      className={cn(
+                        "flex-1 px-4 py-3 text-sm font-medium transition-colors",
+                        sidebarTab === "chat" 
+                          ? "border-b-2 border-primary text-foreground" 
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                      data-testid="mobile-tab-chat"
+                    >
+                      AI Chat
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {/* AI Chatbot (AI modes only) */}
-              {!isManualMode && (
-                <div className="flex-1 min-h-[300px] border-t overflow-hidden">
+              {/* Mobile Settings Tab Content */}
+              {sidebarTab === "settings" && (
+                <div className="flex-1 overflow-y-auto scrollbar-trading p-4 space-y-4">
+                  {/* Credentials */}
+                  <CredentialsForm />
+
+                  {/* API Status Window */}
+                  <APIStatusWindow />
+
+                  {/* Algorithm Status (AI modes only) */}
+                  {!isManualMode && <AlgorithmStatus />}
+
+                  {/* Risk Parameters (AI modes only) */}
+                  {!isManualMode && <RiskParametersCard />}
+
+                  {/* Manual Trading Panel (Manual mode only) */}
+                  {isManualMode && <ManualTradingPanel />}
+                </div>
+              )}
+
+              {/* Mobile Chat Tab Content (AI modes only) */}
+              {sidebarTab === "chat" && !isManualMode && (
+                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                   <AIChatbot />
                 </div>
               )}
