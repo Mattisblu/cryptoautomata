@@ -50,38 +50,38 @@ interface ToobitKline {
 
 function generateToobitSignature(
   secretKey: string,
-  timestamp: string,
-  method: string,
-  path: string,
-  body: string = ""
+  queryString: string
 ): string {
-  const message = timestamp + method.toUpperCase() + path + body;
   const hmac = crypto.createHmac("sha256", secretKey);
-  hmac.update(message);
+  hmac.update(queryString);
   return hmac.digest("hex");
 }
 
-function createToobitHeaders(
+function createToobitSignedParams(
   credentials: ApiCredentials,
-  method: string,
-  path: string,
-  body: string = ""
-): Record<string, string> {
-  const timestamp = Date.now().toString();
-  const signature = generateToobitSignature(credentials.secretKey, timestamp, method, path, body);
+  params: Record<string, string | number> = {}
+): { queryString: string; headers: Record<string, string> } {
+  const timestamp = Date.now();
+  const allParams: Record<string, string | number> = {
+    ...params,
+    timestamp,
+    recvWindow: 10000,
+  };
+  
+  const sortedParams = Object.keys(allParams)
+    .sort()
+    .map(key => `${key}=${allParams[key]}`)
+    .join("&");
+  
+  const signature = generateToobitSignature(credentials.secretKey, sortedParams);
+  const queryString = `${sortedParams}&signature=${signature}`;
   
   const headers: Record<string, string> = {
-    "X-TB-APIKEY": credentials.apiKey,
-    "X-TB-TIMESTAMP": timestamp,
-    "X-TB-SIGN": signature,
+    "X-BB-APIKEY": credentials.apiKey,
     "Content-Type": "application/json",
   };
   
-  if (credentials.passphrase) {
-    headers["X-TB-PASSPHRASE"] = credentials.passphrase;
-  }
-  
-  return headers;
+  return { queryString, headers };
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 10000): Promise<Response> {
@@ -101,7 +101,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
 
 export async function getToobitMarkets(): Promise<Market[]> {
   try {
-    const response = await fetchWithTimeout(`${TOOBIT_BASE_URL}/v1/public/instruments`);
+    const response = await fetchWithTimeout(`${TOOBIT_BASE_URL}/api/v1/exchangeInfo`);
     
     if (!response.ok) {
       console.error(`Toobit markets API error: ${response.status}`);
@@ -110,20 +110,20 @@ export async function getToobitMarkets(): Promise<Market[]> {
     
     const data = await response.json();
     
-    if (!data.data?.instruments) {
-      console.error("Toobit markets response error:", data.message || "No instruments data");
+    if (!data.symbols) {
+      console.error("Toobit markets response error:", data.msg || "No symbols data");
       return [];
     }
     
-    return data.data.instruments
-      .filter((s: ToobitSymbol) => s.status === "TRADING" && s.quoteAsset === "USDT")
-      .map((symbol: ToobitSymbol) => ({
+    return data.symbols
+      .filter((s: any) => s.status === "TRADING" && s.quoteAsset === "USDT")
+      .map((symbol: any) => ({
         symbol: symbol.symbol,
         baseAsset: symbol.baseAsset,
         quoteAsset: symbol.quoteAsset,
-        pricePrecision: symbol.pricePrecision,
-        quantityPrecision: symbol.quantityPrecision,
-        maxLeverage: symbol.maxLeverage || 100,
+        pricePrecision: symbol.quotePrecision || 8,
+        quantityPrecision: symbol.baseAssetPrecision || 8,
+        maxLeverage: 100,
       }));
   } catch (error) {
     console.error("Failed to fetch Toobit markets:", error);
@@ -133,7 +133,7 @@ export async function getToobitMarkets(): Promise<Market[]> {
 
 export async function getToobitTicker(symbol: string): Promise<ApiResult<Ticker>> {
   try {
-    const response = await fetchWithTimeout(`${TOOBIT_BASE_URL}/v1/public/ticker?symbol=${symbol}`);
+    const response = await fetchWithTimeout(`${TOOBIT_BASE_URL}/quote/v1/ticker/24hr?symbol=${symbol}`);
     
     if (!response.ok) {
       return {
@@ -144,29 +144,32 @@ export async function getToobitTicker(symbol: string): Promise<ApiResult<Ticker>
       };
     }
     
-    const responseData: ToobitResponse<ToobitTicker> = await response.json();
+    const data = await response.json();
     
-    if (responseData.code !== "0" || !responseData.data) {
+    // Response is an array with one ticker object using short property names
+    const ticker = Array.isArray(data) ? data[0] : data;
+    
+    if (!ticker || !ticker.s) {
       return {
         success: false,
         data: null,
-        error: responseData.message || "No ticker data",
-        errorCode: responseData.code,
+        error: "No ticker data",
+        errorCode: "NO_DATA",
       };
     }
     
-    const ticker = responseData.data;
+    // Short property names: t=time, s=symbol, c=close, h=high, l=low, o=open, v=volume, pc=priceChange, pcp=priceChangePercent
     return {
       success: true,
       data: {
         symbol,
-        lastPrice: parseFloat(ticker.lastPrice),
-        priceChange: parseFloat(ticker.priceChange),
-        priceChangePercent: parseFloat(ticker.priceChangePercent),
-        high24h: parseFloat(ticker.highPrice),
-        low24h: parseFloat(ticker.lowPrice),
-        volume24h: parseFloat(ticker.volume),
-        timestamp: ticker.time,
+        lastPrice: parseFloat(ticker.c || "0"),
+        priceChange: parseFloat(ticker.pc || "0"),
+        priceChangePercent: parseFloat(ticker.pcp || "0") * 100,
+        high24h: parseFloat(ticker.h || "0"),
+        low24h: parseFloat(ticker.l || "0"),
+        volume24h: parseFloat(ticker.v || "0"),
+        timestamp: ticker.t || Date.now(),
       },
     };
   } catch (error) {
@@ -188,7 +191,7 @@ export async function getToobitKlines(
   try {
     const interval = mapTimeframeToInterval(timeframe);
     const response = await fetchWithTimeout(
-      `${TOOBIT_BASE_URL}/v1/public/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+      `${TOOBIT_BASE_URL}/quote/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
     );
     
     if (!response.ok) {
@@ -200,24 +203,25 @@ export async function getToobitKlines(
       };
     }
     
-    const responseData: ToobitResponse<ToobitKline[]> = await response.json();
+    const rawData = await response.json();
     
-    if (responseData.code !== "0" || !responseData.data || responseData.data.length === 0) {
+    if (!Array.isArray(rawData) || rawData.length === 0) {
       return {
         success: false,
         data: null,
-        error: responseData.message || "No klines data",
-        errorCode: responseData.code,
+        error: "No klines data",
+        errorCode: "NO_DATA",
       };
     }
     
-    const klines: Kline[] = responseData.data.map((k: ToobitKline) => ({
-      time: k.time,
-      open: parseFloat(k.open),
-      high: parseFloat(k.high),
-      low: parseFloat(k.low),
-      close: parseFloat(k.close),
-      volume: parseFloat(k.volume),
+    // Toobit klines format: [openTime, open, high, low, close, volume, closeTime, quoteVolume, ...]
+    const klines: Kline[] = rawData.map((k: any[]) => ({
+      time: k[0],
+      open: parseFloat(k[1]),
+      high: parseFloat(k[2]),
+      low: parseFloat(k[3]),
+      close: parseFloat(k[4]),
+      volume: parseFloat(k[5]),
     }));
     
     return {
@@ -236,28 +240,41 @@ export async function getToobitKlines(
 }
 
 function mapTimeframeToInterval(timeframe: string): string {
+  // Toobit uses Binance-style intervals: 1m, 5m, 15m, 30m, 1h, 4h, 1d
   const mapping: Record<string, string> = {
-    "1m": "1min",
-    "5m": "5min",
-    "15m": "15min",
-    "30m": "30min",
-    "1h": "1hour",
-    "4h": "4hour",
-    "1d": "1day",
-    "1D": "1day",
+    "1m": "1m",
+    "5m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1d",
+    "1D": "1d",
   };
-  return mapping[timeframe] || "15min";
+  return mapping[timeframe] || "15m";
 }
 
 export async function validateToobitCredentials(credentials: ApiCredentials): Promise<boolean> {
   try {
-    const headers = createToobitHeaders(credentials, "GET", "/v1/account/info");
-    const response = await fetchWithTimeout(`${TOOBIT_BASE_URL}/v1/account/info`, {
+    const { queryString, headers } = createToobitSignedParams(credentials);
+    const url = `${TOOBIT_BASE_URL}/api/v1/spot/account?${queryString}`;
+    
+    console.log(`[TOOBIT] Validating credentials at ${url}`);
+    
+    const response = await fetchWithTimeout(url, {
       method: "GET",
       headers,
     });
     
-    return response.ok;
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`[TOOBIT] Validation response:`, data.code === 0 ? "Success" : data.message);
+      return data.code === 0 || data.code === "0";
+    }
+    
+    const errorText = await response.text();
+    console.warn(`[TOOBIT] Validation failed: ${response.status} - ${errorText}`);
+    return false;
   } catch (error) {
     console.warn("Toobit credential validation failed:", error);
     return false;

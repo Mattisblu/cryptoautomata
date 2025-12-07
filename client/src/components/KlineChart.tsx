@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { createChart, ColorType, CandlestickSeries, type IChartApi, type ISeriesApi, type CandlestickData, type Time } from "lightweight-charts";
 import { useTradingContext } from "@/lib/tradingContext";
 import { Button } from "@/components/ui/button";
@@ -16,18 +16,32 @@ const timeframes = [
 
 export function KlineChart() {
   const { klines, selectedMarket, theme, timeframe, setTimeframe } = useTradingContext();
-  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [chartReady, setChartReady] = useState(false);
 
+  // Callback ref to track container mounting
+  const containerRefCallback = useCallback((node: HTMLDivElement | null) => {
+    setContainerEl(node);
+  }, []);
+
+  // Create chart when container is available
   useEffect(() => {
-    if (!chartContainerRef.current) return;
+    if (!containerEl) return;
+
+    // Clean up existing chart
+    if (chartRef.current) {
+      chartRef.current.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+    }
 
     const isDark = theme === "dark";
     
-    const chart = createChart(chartContainerRef.current, {
+    const chart = createChart(containerEl, {
+      width: containerEl.clientWidth,
+      height: containerEl.clientHeight,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: isDark ? "#a1a1aa" : "#71717a",
@@ -70,30 +84,29 @@ export function KlineChart() {
 
     chartRef.current = chart;
     seriesRef.current = candlestickSeries;
-    setChartReady(true);
 
     const handleResize = () => {
-      if (chartContainerRef.current && chartRef.current) {
+      if (containerEl && chartRef.current) {
         chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight,
+          width: containerEl.clientWidth,
+          height: containerEl.clientHeight,
         });
       }
     };
 
     window.addEventListener("resize", handleResize);
-    handleResize();
 
     return () => {
       window.removeEventListener("resize", handleResize);
       chart.remove();
-      setChartReady(false);
+      chartRef.current = null;
+      seriesRef.current = null;
     };
-  }, [theme]);
+  }, [containerEl, theme]);
 
-  // Update chart data when klines change or chart becomes ready
+  // Update chart data when klines change
   useEffect(() => {
-    if (!chartReady || !seriesRef.current) return;
+    if (!seriesRef.current || !chartRef.current) return;
     
     if (klines.length > 0) {
       const chartData: CandlestickData<Time>[] = klines.map((k) => ({
@@ -104,9 +117,9 @@ export function KlineChart() {
         close: k.close,
       }));
       seriesRef.current.setData(chartData);
-      chartRef.current?.timeScale().fitContent();
+      chartRef.current.timeScale().fitContent();
     }
-  }, [klines, chartReady]);
+  }, [klines]);
 
   if (!selectedMarket) {
     return (
@@ -174,7 +187,7 @@ export function KlineChart() {
       
       {/* Chart Container */}
       <div 
-        ref={chartContainerRef} 
+        ref={containerRefCallback} 
         className="flex-1 min-h-0"
       />
     </div>
