@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Copy, Check, Loader2, Code, Sparkles, Trash2, Wand2, Brain, TrendingUp, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { Send, Bot, User, Copy, Check, Loader2, Code, Sparkles, Trash2, Wand2, Brain, TrendingUp, AlertTriangle, CheckCircle2, XCircle, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -495,7 +495,63 @@ export function AIChatbot() {
         </ScrollArea>
 
         {/* Input Area */}
-        <div className="flex-shrink-0 p-4 border-t bg-card">
+        <div className="flex-shrink-0 p-4 border-t bg-card space-y-3">
+          {/* Preset Strategy Buttons */}
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-8"
+              onClick={() => {
+                setInput("Generate a momentum scalping strategy for " + selectedMarket?.symbol + " with 1% stop loss and 2% take profit");
+              }}
+              disabled={!selectedMarket || sendMessageMutation.isPending}
+              data-testid="button-strategy-momentum"
+            >
+              <Zap className="h-3 w-3 mr-1" />
+              Momentum Scalp
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-8"
+              onClick={() => {
+                setInput("Generate a mean reversion strategy for " + selectedMarket?.symbol + " with 1.5% stop loss and 3% take profit");
+              }}
+              disabled={!selectedMarket || sendMessageMutation.isPending}
+              data-testid="button-strategy-reversion"
+            >
+              <TrendingUp className="h-3 w-3 mr-1" />
+              Mean Reversion
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-8"
+              onClick={() => {
+                setInput("Generate a trend following strategy for " + selectedMarket?.symbol + " with 2% stop loss and 5% take profit");
+              }}
+              disabled={!selectedMarket || sendMessageMutation.isPending}
+              data-testid="button-strategy-trend"
+            >
+              <TrendingUp className="h-3 w-3 mr-1" />
+              Trend Follow
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-8"
+              onClick={() => {
+                setInput("Generate a range breakout strategy for " + selectedMarket?.symbol + " with 1.5% stop loss and 4% take profit");
+              }}
+              disabled={!selectedMarket || sendMessageMutation.isPending}
+              data-testid="button-strategy-breakout"
+            >
+              <Wand2 className="h-3 w-3 mr-1" />
+              Range Breakout
+            </Button>
+          </div>
+
           <div className="flex gap-2">
             <Textarea
               value={input}

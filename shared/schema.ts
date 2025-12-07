@@ -240,7 +240,7 @@ export interface Market {
 }
 
 // Trading modes
-export const tradingModes = ["ai-trading", "ai-scalping", "manual"] as const;
+export const tradingModes = ["ai-trading", "manual"] as const;
 export type TradingMode = typeof tradingModes[number];
 
 // Order types

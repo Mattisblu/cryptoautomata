@@ -14,6 +14,7 @@ import { TradeCycleControls } from "@/components/TradeCycleControls";
 import { AIChatbot } from "@/components/AIChatbot";
 import { AlgorithmStatus } from "@/components/AlgorithmStatus";
 import { RiskParametersCard } from "@/components/RiskParametersCard";
+import { APIStatusWindow } from "@/components/APIStatusWindow";
 import { NotificationPanel } from "@/components/NotificationPanel";
 import { useTradingContext } from "@/lib/tradingContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -145,9 +146,12 @@ export default function Dashboard() {
 
         {/* Right Column - Desktop Sidebar (hidden on mobile/tablet) */}
         <div className="hidden xl:flex w-[380px] border-l bg-card/30 flex-col overflow-hidden">
-          <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading max-h-[calc(100vh-400px)]">
+          <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading max-h-[calc(100vh-450px)]">
             {/* Credentials */}
             <CredentialsForm />
+
+            {/* API Status Window */}
+            <APIStatusWindow />
 
             {/* Algorithm Status (AI modes only) */}
             {!isManualMode && <AlgorithmStatus />}
@@ -184,6 +188,9 @@ export default function Dashboard() {
               <div className="flex-shrink-0 p-4 space-y-4 overflow-y-auto scrollbar-trading">
                 {/* Credentials */}
                 <CredentialsForm />
+
+                {/* API Status Window */}
+                <APIStatusWindow />
 
                 {/* Algorithm Status (AI modes only) */}
                 {!isManualMode && <AlgorithmStatus />}

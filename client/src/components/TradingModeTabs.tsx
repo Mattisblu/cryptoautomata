@@ -1,4 +1,4 @@
-import { Bot, Zap, Hand } from "lucide-react";
+import { Bot, Hand } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTradingContext } from "@/lib/tradingContext";
 import type { TradingMode } from "@shared/schema";
@@ -15,13 +15,7 @@ const tradingModes: TradingModeConfig[] = [
     value: "ai-trading",
     label: "AI Trading",
     icon: Bot,
-    description: "Automated trading with AI-generated algorithms",
-  },
-  {
-    value: "ai-scalping",
-    label: "AI Scalping",
-    icon: Zap,
-    description: "High-frequency automated scalping strategies",
+    description: "Automated trading with AI-generated algorithms and scalping strategies",
   },
   {
     value: "manual",
@@ -41,7 +35,7 @@ export function TradingModeTabs() {
       onValueChange={(v) => setTradingMode(v as TradingMode)}
       className="w-full"
     >
-      <TabsList className="grid w-full grid-cols-3 bg-muted/50">
+      <TabsList className="grid w-full grid-cols-2 bg-muted/50">
         {tradingModes.map((mode) => {
           const Icon = mode.icon;
           return (
