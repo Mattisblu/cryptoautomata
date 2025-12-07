@@ -54,10 +54,20 @@ export default function Dashboard() {
   });
 
   // Fetch klines
-  const { data: klinesData } = useQuery<{ klines: Kline[] }>({
-    queryKey: [`/api/klines?exchange=${selectedExchange}&symbol=${selectedMarket?.symbol}&timeframe=15m`],
-    enabled: !!selectedExchange && !!selectedMarket,
-    refetchInterval: 0,
+  const { data: klinesData } = useQuery<{ success: boolean; klines: Kline[] }>({
+    queryKey: [
+      `/api/klines`,
+      selectedExchange,
+      selectedMarket?.symbol,
+      "15m",
+    ],
+    enabled: !!selectedExchange && !!selectedMarket?.symbol,
+    queryFn: async () => {
+      const url = `/api/klines?exchange=${selectedExchange}&symbol=${selectedMarket?.symbol}&timeframe=15m`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Failed to fetch klines");
+      return response.json();
+    },
   });
 
   // Update positions in context
