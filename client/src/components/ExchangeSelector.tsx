@@ -12,8 +12,8 @@ import type { Exchange } from "@shared/schema";
 const exchangeInfo: Record<Exchange, { name: string; logo: string }> = {
   coinstore: { name: "Coinstore", logo: "CS" },
   bydfi: { name: "BYDFI", logo: "BY" },
-  bitunex: { name: "Bitunex", logo: "BX" },
   toobit: { name: "Toobit", logo: "TB" },
+  bitunix: { name: "Bitunix", logo: "BU" },
 };
 
 export function ExchangeSelector() {

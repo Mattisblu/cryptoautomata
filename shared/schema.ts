@@ -226,7 +226,7 @@ export type NotificationType = typeof notificationTypes[number];
 // ============ EXISTING TYPES (Non-database) ============
 
 // Exchange types
-export const exchanges = ["coinstore", "bydfi", "bitunex", "toobit", "bitunix"] as const;
+export const exchanges = ["coinstore", "bydfi", "toobit", "bitunix"] as const;
 export type Exchange = typeof exchanges[number];
 
 // Market/Trading pair types

@@ -2,7 +2,7 @@ import type { Exchange, Market, Ticker, Kline, Position, Order, ApiCredentials }
 import { randomUUID } from "crypto";
 import { getCoinstoreContracts, getCoinstoreTicker, getCoinstoreKlines, validateCoinstoreCredentials } from "./coinstoreApi";
 import { getBydfiMarkets, getBydfiTicker, getBydfiKlines, validateBydfiCredentials } from "./bydfiApi";
-import { getBitunexMarkets, getBitunexTicker, getBitunexKlines, validateBitunexCredentials } from "./bitunexApi";
+import { getBitunixMarkets, getBitunixTicker, getBitunixKlines, validateBitunixCredentials } from "./bitunixApi";
 import { getToobitMarkets, getToobitTicker, getToobitKlines, validateToobitCredentials } from "./toobitApi";
 
 // Flag to enable/disable live API (can be controlled via environment)
@@ -55,11 +55,11 @@ const EXCHANGE_CONFIG: Record<Exchange, {
     },
     priceVolatility: 0.004,
   },
-  bitunex: {
-    name: "Bitunex",
-    maxLeverage: 100,
+  bitunix: {
+    name: "Bitunix",
+    maxLeverage: 125,
     makerFee: 0.0002,
-    takerFee: 0.0004,
+    takerFee: 0.0006,
     minOrderSize: {
       BTCUSDT: 0.001,
       ETHUSDT: 0.01,
@@ -121,15 +121,15 @@ const FALLBACK_MARKETS: Record<Exchange, Market[]> = {
     { symbol: "OPUSDT", baseAsset: "OP", quoteAsset: "USDT", pricePrecision: 4, quantityPrecision: 1, maxLeverage: 25 },
     { symbol: "APTUSDT", baseAsset: "APT", quoteAsset: "USDT", pricePrecision: 3, quantityPrecision: 2, maxLeverage: 25 },
   ],
-  bitunex: [
-    { symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", pricePrecision: 2, quantityPrecision: 6, maxLeverage: 100 },
-    { symbol: "ETHUSDT", baseAsset: "ETH", quoteAsset: "USDT", pricePrecision: 2, quantityPrecision: 5, maxLeverage: 75 },
-    { symbol: "SOLUSDT", baseAsset: "SOL", quoteAsset: "USDT", pricePrecision: 3, quantityPrecision: 2, maxLeverage: 50 },
-    { symbol: "BNBUSDT", baseAsset: "BNB", quoteAsset: "USDT", pricePrecision: 2, quantityPrecision: 4, maxLeverage: 50 },
-    { symbol: "XRPUSDT", baseAsset: "XRP", quoteAsset: "USDT", pricePrecision: 4, quantityPrecision: 1, maxLeverage: 50 },
-    { symbol: "ADAUSDT", baseAsset: "ADA", quoteAsset: "USDT", pricePrecision: 5, quantityPrecision: 1, maxLeverage: 25 },
-    { symbol: "DOGEUSDT", baseAsset: "DOGE", quoteAsset: "USDT", pricePrecision: 5, quantityPrecision: 0, maxLeverage: 25 },
-    { symbol: "AVAXUSDT", baseAsset: "AVAX", quoteAsset: "USDT", pricePrecision: 3, quantityPrecision: 2, maxLeverage: 25 },
+  bitunix: [
+    { symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", pricePrecision: 2, quantityPrecision: 6, maxLeverage: 125 },
+    { symbol: "ETHUSDT", baseAsset: "ETH", quoteAsset: "USDT", pricePrecision: 2, quantityPrecision: 5, maxLeverage: 100 },
+    { symbol: "SOLUSDT", baseAsset: "SOL", quoteAsset: "USDT", pricePrecision: 3, quantityPrecision: 2, maxLeverage: 75 },
+    { symbol: "BNBUSDT", baseAsset: "BNB", quoteAsset: "USDT", pricePrecision: 2, quantityPrecision: 4, maxLeverage: 75 },
+    { symbol: "XRPUSDT", baseAsset: "XRP", quoteAsset: "USDT", pricePrecision: 4, quantityPrecision: 1, maxLeverage: 75 },
+    { symbol: "ADAUSDT", baseAsset: "ADA", quoteAsset: "USDT", pricePrecision: 5, quantityPrecision: 1, maxLeverage: 50 },
+    { symbol: "DOGEUSDT", baseAsset: "DOGE", quoteAsset: "USDT", pricePrecision: 5, quantityPrecision: 0, maxLeverage: 50 },
+    { symbol: "AVAXUSDT", baseAsset: "AVAX", quoteAsset: "USDT", pricePrecision: 3, quantityPrecision: 2, maxLeverage: 50 },
   ],
   toobit: [
     { symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", pricePrecision: 1, quantityPrecision: 5, maxLeverage: 150 },
@@ -242,7 +242,7 @@ function generateSimulatedTicker(exchange: Exchange, symbol: string): Ticker {
   const volumeMultipliers: Record<Exchange, number> = {
     coinstore: 1.0,
     bydfi: 1.5,
-    bitunex: 1.2,
+    bitunix: 1.2,
     toobit: 1.3,
   };
   const volumeMultiplier = volumeMultipliers[exchange];
@@ -284,7 +284,7 @@ function generateSimulatedKlines(exchange: Exchange, symbol: string, timeframe: 
     const volumeMultipliers: Record<Exchange, number> = {
       coinstore: 1.0,
       bydfi: 1.5,
-      bitunex: 1.2,
+      bitunix: 1.2,
       toobit: 1.3,
     };
     
@@ -348,8 +348,8 @@ export const exchangeService: ExchangeService = {
           return await validateCoinstoreCredentials(credentials);
         } else if (credentials.exchange === "bydfi") {
           return await validateBydfiCredentials(credentials);
-        } else if (credentials.exchange === "bitunex") {
-          return await validateBitunexCredentials(credentials);
+        } else if (credentials.exchange === "bitunix") {
+          return await validateBitunixCredentials(credentials);
         } else if (credentials.exchange === "toobit") {
           return await validateToobitCredentials(credentials);
         }
@@ -377,8 +377,8 @@ export const exchangeService: ExchangeService = {
           liveMarkets = await getCoinstoreContracts();
         } else if (exchange === "bydfi") {
           liveMarkets = await getBydfiMarkets();
-        } else if (exchange === "bitunex") {
-          liveMarkets = await getBitunexMarkets();
+        } else if (exchange === "bitunix") {
+          liveMarkets = await getBitunixMarkets();
         } else if (exchange === "toobit") {
           liveMarkets = await getToobitMarkets();
         }
@@ -432,17 +432,17 @@ export const exchangeService: ExchangeService = {
             dataError = result.error;
             lastDataError = result.error;
           }
-        } else if (exchange === "bitunex") {
-          const result = await getBitunexTicker(symbol);
+        } else if (exchange === "bitunix") {
+          const result = await getBitunixTicker(symbol);
           if (result.success && result.data && result.data.lastPrice > 0) {
             const cacheKey = `${exchange}:${symbol}`;
             priceCache.set(cacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
             lastDataSource = "live";
             lastDataError = undefined;
-            console.log(`[BITUNEX] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
+            console.log(`[BITUNIX] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
             return { ticker: result.data, dataSource: "live" };
           } else if (!result.success) {
-            console.warn(`[BITUNEX] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
+            console.warn(`[BITUNIX] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
             dataError = result.error;
             lastDataError = result.error;
           }
@@ -504,15 +504,15 @@ export const exchangeService: ExchangeService = {
             dataError = result.error;
             lastDataError = result.error;
           }
-        } else if (exchange === "bitunex") {
-          const result = await getBitunexKlines(symbol, timeframe, limit);
+        } else if (exchange === "bitunix") {
+          const result = await getBitunixKlines(symbol, timeframe, limit);
           if (result.success && result.data && result.data.length > 0) {
             lastDataSource = "live";
             lastDataError = undefined;
-            console.log(`[BITUNEX] Live klines for ${symbol}: ${result.data.length} candles`);
+            console.log(`[BITUNIX] Live klines for ${symbol}: ${result.data.length} candles`);
             return { klines: result.data, dataSource: "live" };
           } else if (!result.success) {
-            console.warn(`[BITUNEX] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
+            console.warn(`[BITUNIX] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
             dataError = result.error;
             lastDataError = result.error;
           }
