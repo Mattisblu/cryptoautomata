@@ -22,7 +22,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Bot, BarChart3, Code, ExternalLink, PanelRightOpen, PanelRightClose, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
-import type { Position, Order } from "@shared/schema";
+import type { Position, Order, Kline } from "@shared/schema";
 
 export default function Dashboard() {
   const { 
@@ -31,6 +31,7 @@ export default function Dashboard() {
     selectedMarket,
     setPositions,
     setOrders,
+    setKlines,
   } = useTradingContext();
   const isManualMode = tradingMode === "manual";
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -52,6 +53,13 @@ export default function Dashboard() {
     refetchInterval: 5000,
   });
 
+  // Fetch klines
+  const { data: klinesData } = useQuery<{ klines: Kline[] }>({
+    queryKey: [`/api/klines?exchange=${selectedExchange}&symbol=${selectedMarket?.symbol}&timeframe=15m`],
+    enabled: !!selectedExchange && !!selectedMarket,
+    refetchInterval: 0,
+  });
+
   // Update positions in context
   useEffect(() => {
     if (positionsData?.positions) {
@@ -65,6 +73,13 @@ export default function Dashboard() {
       setOrders(ordersData.orders);
     }
   }, [ordersData, setOrders]);
+
+  // Update klines in context
+  useEffect(() => {
+    if (klinesData?.klines) {
+      setKlines(klinesData.klines);
+    }
+  }, [klinesData, setKlines]);
 
   return (
     <div className="flex flex-col h-screen bg-background" data-testid="dashboard">
