@@ -55,6 +55,7 @@ export function TradeCycleControls() {
     tradeCycleState, 
     setTradeCycleState, 
     isAuthenticated, 
+    selectedExchange,
     selectedMarket,
     tradingMode,
     executionMode,
@@ -82,6 +83,7 @@ export function TradeCycleControls() {
         optimizationMode,
         symbol: selectedMarket?.symbol,
         algorithmId: activeAlgorithm?.id,
+        exchange: selectedExchange,
       });
     },
     onSuccess: () => {
@@ -91,6 +93,7 @@ export function TradeCycleControls() {
         mode: tradingMode,
         executionMode,
         optimizationMode,
+        exchange: selectedExchange || tradeCycleState.exchange,
         symbol: selectedMarket?.symbol || "",
         startedAt: Date.now(),
         algorithmId: activeAlgorithm?.id,
