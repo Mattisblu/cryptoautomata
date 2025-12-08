@@ -167,11 +167,50 @@ export const algorithms = pgTable("algorithms", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Live Positions - persists active trading positions across restarts
+export const livePositions = pgTable("live_positions", {
+  id: text("id").primaryKey(), // Position ID from exchange or generated
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  side: text("side").notNull(), // "long" or "short"
+  entryPrice: real("entry_price").notNull(),
+  markPrice: real("mark_price").notNull(),
+  quantity: real("quantity").notNull(),
+  leverage: integer("leverage").notNull().default(1),
+  marginType: text("margin_type").notNull().default("isolated"), // "isolated" or "cross"
+  unrealizedPnl: real("unrealized_pnl").notNull().default(0),
+  unrealizedPnlPercent: real("unrealized_pnl_percent").notNull().default(0),
+  liquidationPrice: real("liquidation_price").notNull().default(0),
+  stopLossPrice: real("stop_loss_price"),
+  takeProfitPrice: real("take_profit_price"),
+  trailingStopDistance: real("trailing_stop_distance"),
+  stopOrderId: text("stop_order_id"),
+  takeProfitOrderId: text("take_profit_order_id"),
+  trailingStopOrderId: text("trailing_stop_order_id"),
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+});
+
+// Live Orders - persists active orders across restarts
+export const liveOrders = pgTable("live_orders", {
+  id: text("id").primaryKey(), // Order ID from exchange or generated
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  type: text("type").notNull(), // "market", "limit", "stop_market", "stop_limit"
+  side: text("side").notNull(), // "buy" or "sell"
+  price: real("price").notNull(),
+  quantity: real("quantity").notNull(),
+  filledQuantity: real("filled_quantity").notNull().default(0),
+  status: text("status").notNull().default("pending"), // "pending", "partial", "filled", "cancelled"
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+});
+
 // Relations
 export const tradesRelations = relations(trades, ({ }) => ({}));
 export const dailySummariesRelations = relations(dailySummaries, ({ }) => ({}));
 export const algorithmPerformanceRelations = relations(algorithmPerformance, ({ }) => ({}));
 export const algorithmVersionsRelations = relations(algorithmVersions, ({ }) => ({}));
+export const livePositionsRelations = relations(livePositions, ({ }) => ({}));
+export const liveOrdersRelations = relations(liveOrders, ({ }) => ({}));
 export const algorithmsRelations = relations(algorithms, ({ }) => ({}));
 export const abTestsRelations = relations(abTests, ({ }) => ({}));
 export const notificationsRelations = relations(notifications, ({ }) => ({}));
