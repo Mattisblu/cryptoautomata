@@ -28,10 +28,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // WebSocket server for real-time data
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
   const clients = new Set<WebSocket>();
-  const tickerStreams = new Map<string, { stop: () => void }>();
+  // Track ticker streams per client (not globally) to prevent orphaned streams
+  const clientStreams = new Map<WebSocket, Map<string, { stop: () => void }>>();
 
   wss.on("connection", (ws) => {
     clients.add(ws);
+    clientStreams.set(ws, new Map());
     notificationService.registerClient(ws);
     console.log("WebSocket client connected");
 
@@ -41,28 +43,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         if (data.type === "subscribe" && data.symbol) {
           const streamKey = `${data.exchange}:${data.symbol}`;
+          const wsStreams = clientStreams.get(ws);
           
-          // Stop existing stream if any
-          if (tickerStreams.has(streamKey)) {
-            tickerStreams.get(streamKey)?.stop();
-          }
-
-          // Start new ticker stream with exchange-specific behavior
-          const stream = createTickerStream(
-            data.exchange as Exchange,
-            data.symbol,
-            (streamData) => {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ 
-                  type: "ticker", 
-                  data: streamData.ticker,
-                  dataSource: streamData.dataSource,
-                  ...(streamData.dataError ? { dataError: streamData.dataError } : {})
-                }));
-              }
+          if (wsStreams) {
+            // Stop existing stream for this client on this symbol if any
+            if (wsStreams.has(streamKey)) {
+              wsStreams.get(streamKey)?.stop();
+              console.log(`Stopped existing ticker stream for ${streamKey}`);
             }
-          );
-          tickerStreams.set(streamKey, stream);
+
+            // Start new ticker stream for this client
+            const stream = createTickerStream(
+              data.exchange as Exchange,
+              data.symbol,
+              (streamData) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ 
+                    type: "ticker", 
+                    data: streamData.ticker,
+                    dataSource: streamData.dataSource,
+                    ...(streamData.dataError ? { dataError: streamData.dataError } : {})
+                  }));
+                }
+              }
+            );
+            wsStreams.set(streamKey, stream);
+            console.log(`Started ticker stream for ${streamKey}`);
+          }
 
           // Send initial klines - getKlines now returns KlinesResult with data source embedded
           const klinesResult = await exchangeService.getKlines(
@@ -86,6 +93,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
 
     ws.on("close", () => {
+      // Stop all ticker streams for this client when they disconnect
+      const wsStreams = clientStreams.get(ws);
+      if (wsStreams) {
+        wsStreams.forEach((stream, streamKey) => {
+          stream.stop();
+          console.log(`Stopped orphaned ticker stream for ${streamKey} on client disconnect`);
+        });
+        clientStreams.delete(ws);
+      }
       clients.delete(ws);
       notificationService.unregisterClient(ws);
       console.log("WebSocket client disconnected");
