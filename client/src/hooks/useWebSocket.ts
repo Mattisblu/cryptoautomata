@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useTradingContext } from "@/lib/tradingContext";
+import { queryClient } from "@/lib/queryClient";
 import type { Ticker, Kline, TradeCycleState, Order, Position } from "@shared/schema";
 
 export function useWebSocket() {
@@ -127,6 +128,14 @@ export function useWebSocket() {
               }
               break;
             }
+
+            case "strategyStopped":
+            case "strategyStarted":
+            case "strategyPaused":
+            case "strategyResumed":
+            case "strategyUpdated":
+              queryClient.invalidateQueries({ queryKey: ["/api/running-strategies"] });
+              break;
           }
         } catch (error) {
           console.error("WebSocket message parse error:", error);
