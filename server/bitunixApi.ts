@@ -34,31 +34,54 @@ interface BitunixTicker {
   ts: number;
 }
 
+function sha256Hex(input: string): string {
+  return crypto.createHash("sha256").update(input, "utf8").digest("hex");
+}
+
+function formatTimestamp(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(now.getUTCDate()).padStart(2, "0");
+  const hours = String(now.getUTCHours()).padStart(2, "0");
+  const minutes = String(now.getUTCMinutes()).padStart(2, "0");
+  const seconds = String(now.getUTCSeconds()).padStart(2, "0");
+  return `${year}${month}${day}${hours}${minutes}${seconds}`;
+}
+
 function generateBitunixSignature(
+  apiKey: string,
   secretKey: string,
   timestamp: string,
   nonce: string,
-  queryString: string,
+  queryParams: string,
   body: string
 ): string {
-  const message = `${timestamp}${nonce}${queryString}${body}`;
-  const hmac = crypto.createHmac("sha256", secretKey);
-  hmac.update(message);
-  return hmac.digest("hex");
+  // Bitunix uses double SHA256, not HMAC
+  // Step 1: digest = SHA256(nonce + timestamp + apiKey + queryParams + body)
+  const digestInput = nonce + timestamp + apiKey + queryParams + body;
+  const digest = sha256Hex(digestInput);
+  
+  // Step 2: sign = SHA256(digest + secretKey)
+  const signInput = digest + secretKey;
+  const signature = sha256Hex(signInput);
+  
+  return signature;
 }
 
 function createBitunixHeaders(
   credentials: ApiCredentials,
-  queryString: string = "",
+  queryParams: string = "",
   body: string = ""
 ): Record<string, string> {
-  const timestamp = Date.now().toString();
+  const timestamp = formatTimestamp();
   const nonce = crypto.randomBytes(16).toString("hex");
   const signature = generateBitunixSignature(
+    credentials.apiKey,
     credentials.secretKey,
     timestamp,
     nonce,
-    queryString,
+    queryParams,
     body
   );
 
