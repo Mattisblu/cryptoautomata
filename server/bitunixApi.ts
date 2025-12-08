@@ -38,7 +38,7 @@ function sha256Hex(input: string): string {
   return crypto.createHash("sha256").update(input, "utf8").digest("hex");
 }
 
-function formatTimestamp(): string {
+function getTimestampYYYYMMDDHHMMSS(): string {
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
@@ -74,7 +74,7 @@ function createBitunixHeaders(
   queryParams: string = "",
   body: string = ""
 ): Record<string, string> {
-  const timestamp = formatTimestamp();
+  const timestamp = getTimestampYYYYMMDDHHMMSS();
   const nonce = crypto.randomBytes(16).toString("hex");
   const signature = generateBitunixSignature(
     credentials.apiKey,
