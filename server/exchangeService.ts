@@ -154,6 +154,93 @@ const MARKETS_CACHE_TTL = 300000; // 5 minutes
 // Price cache to maintain consistency across calls
 const priceCache: Map<string, { price: number; lastUpdate: number }> = new Map();
 
+// ============ RATE LIMITING & TICKER CACHING ============
+
+// Ticker result cache - prevents duplicate API calls for same symbol within TTL
+const tickerResultCache: Map<string, { result: TickerResult; timestamp: number }> = new Map();
+const TICKER_CACHE_TTL = 2000; // 2 seconds - prevents rapid duplicate calls
+
+// Klines result cache - prevents duplicate API calls for same symbol/timeframe within TTL  
+const klinesResultCache: Map<string, { result: KlinesResult; timestamp: number }> = new Map();
+const KLINES_CACHE_TTL = 5000; // 5 seconds - klines don't change as frequently
+
+// Per-exchange rate limiter - tracks last request time and enforces minimum delay
+const exchangeRateLimits: Map<Exchange, { lastRequest: number; requestQueue: Promise<void> }> = new Map();
+const MIN_REQUEST_DELAY_MS = 200; // Minimum 200ms between requests per exchange
+
+// Rate limit error tracking - if we hit rate limits, back off
+const rateLimitBackoff: Map<Exchange, { until: number; delay: number }> = new Map();
+const INITIAL_BACKOFF_MS = 5000; // 5 seconds initial backoff
+const MAX_BACKOFF_MS = 60000; // Max 60 seconds backoff
+
+async function waitForRateLimit(exchange: Exchange): Promise<void> {
+  // Check if we're in backoff mode due to rate limit error
+  const backoff = rateLimitBackoff.get(exchange);
+  if (backoff && Date.now() < backoff.until) {
+    const waitTime = backoff.until - Date.now();
+    console.log(`[${exchange.toUpperCase()}] Rate limit backoff: waiting ${waitTime}ms`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  // Get or create limiter for this exchange
+  let limiter = exchangeRateLimits.get(exchange);
+  if (!limiter) {
+    limiter = { lastRequest: 0, requestQueue: Promise.resolve() };
+    exchangeRateLimits.set(exchange, limiter);
+  }
+  
+  // Chain this request onto the queue - this ensures serialization
+  // Each caller waits for previous requests to complete before proceeding
+  const previousQueue = limiter.requestQueue;
+  
+  // Create a new promise that this caller will resolve when done with the delay
+  let resolveCurrentRequest: () => void;
+  limiter.requestQueue = new Promise<void>((resolve) => {
+    resolveCurrentRequest = resolve;
+  });
+  
+  // Wait for previous requests to complete
+  await previousQueue;
+  
+  // Calculate delay needed from last request
+  const timeSinceLastRequest = Date.now() - limiter.lastRequest;
+  if (timeSinceLastRequest < MIN_REQUEST_DELAY_MS) {
+    const delay = MIN_REQUEST_DELAY_MS - timeSinceLastRequest;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+  
+  limiter.lastRequest = Date.now();
+  
+  // Signal that this request's delay is complete, allowing next request to proceed
+  resolveCurrentRequest!();
+}
+
+function handleRateLimitError(exchange: Exchange, errorMsg: string): void {
+  // Detect rate limit errors from common patterns
+  const isRateLimit = 
+    errorMsg.toLowerCase().includes("rate limit") ||
+    errorMsg.toLowerCase().includes("too many") ||
+    errorMsg.includes("429") ||
+    errorMsg.includes("HTTP_429");
+  
+  if (isRateLimit) {
+    const current = rateLimitBackoff.get(exchange);
+    const newDelay = current ? Math.min(current.delay * 2, MAX_BACKOFF_MS) : INITIAL_BACKOFF_MS;
+    rateLimitBackoff.set(exchange, { 
+      until: Date.now() + newDelay, 
+      delay: newDelay 
+    });
+    console.warn(`[${exchange.toUpperCase()}] Rate limit detected, backing off for ${newDelay}ms`);
+  }
+}
+
+function clearRateLimitBackoff(exchange: Exchange): void {
+  // Clear backoff on successful request
+  if (rateLimitBackoff.has(exchange)) {
+    rateLimitBackoff.delete(exchange);
+  }
+}
+
 // Data source type
 export type DataSource = "live" | "simulated";
 
@@ -400,147 +487,124 @@ export const exchangeService: ExchangeService = {
   },
 
   async getTicker(exchange: Exchange, symbol: string): Promise<TickerResult> {
+    const tickerCacheKey = `${exchange}:${symbol}`;
+    
+    // Check ticker result cache first - prevents duplicate API calls within TTL
+    const cachedResult = tickerResultCache.get(tickerCacheKey);
+    if (cachedResult && Date.now() - cachedResult.timestamp < TICKER_CACHE_TTL) {
+      return cachedResult.result;
+    }
+    
     let dataError: string | undefined;
     
     if (USE_LIVE_API) {
       try {
+        // Wait for rate limit before making request
+        await waitForRateLimit(exchange);
+        
+        let result: { success: boolean; data: any; error?: string; errorCode?: string } | null = null;
+        
         if (exchange === "coinstore") {
-          const result = await getCoinstoreTicker(symbol);
-          if (result.success && result.data && result.data.lastPrice > 0) {
-            const cacheKey = `${exchange}:${symbol}`;
-            priceCache.set(cacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
-            lastDataSource = "live";
-            lastDataError = undefined;
-            console.log(`[COINSTORE] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
-            return { ticker: result.data, dataSource: "live" };
-          } else if (!result.success) {
-            console.warn(`[COINSTORE] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
-            dataError = result.error;
-            lastDataError = result.error;
-          }
+          result = await getCoinstoreTicker(symbol);
         } else if (exchange === "bydfi") {
-          const result = await getBydfiTicker(symbol);
-          if (result.success && result.data && result.data.lastPrice > 0) {
-            const cacheKey = `${exchange}:${symbol}`;
-            priceCache.set(cacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
-            lastDataSource = "live";
-            lastDataError = undefined;
-            console.log(`[BYDFI] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
-            return { ticker: result.data, dataSource: "live" };
-          } else if (!result.success) {
-            console.warn(`[BYDFI] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
-            dataError = result.error;
-            lastDataError = result.error;
-          }
+          result = await getBydfiTicker(symbol);
         } else if (exchange === "bitunix") {
-          const result = await getBitunixTicker(symbol);
-          if (result.success && result.data && result.data.lastPrice > 0) {
-            const cacheKey = `${exchange}:${symbol}`;
-            priceCache.set(cacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
-            lastDataSource = "live";
-            lastDataError = undefined;
-            console.log(`[BITUNIX] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
-            return { ticker: result.data, dataSource: "live" };
-          } else if (!result.success) {
-            console.warn(`[BITUNIX] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
-            dataError = result.error;
-            lastDataError = result.error;
-          }
+          result = await getBitunixTicker(symbol);
         } else if (exchange === "toobit") {
-          const result = await getToobitTicker(symbol);
-          if (result.success && result.data && result.data.lastPrice > 0) {
-            const cacheKey = `${exchange}:${symbol}`;
-            priceCache.set(cacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
-            lastDataSource = "live";
-            lastDataError = undefined;
-            console.log(`[TOOBIT] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
-            return { ticker: result.data, dataSource: "live" };
-          } else if (!result.success) {
-            console.warn(`[TOOBIT] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
-            dataError = result.error;
-            lastDataError = result.error;
-          }
+          result = await getToobitTicker(symbol);
+        }
+        
+        if (result?.success && result.data && result.data.lastPrice > 0) {
+          priceCache.set(tickerCacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
+          lastDataSource = "live";
+          lastDataError = undefined;
+          clearRateLimitBackoff(exchange);
+          console.log(`[${exchange.toUpperCase()}] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
+          
+          const tickerResult: TickerResult = { ticker: result.data, dataSource: "live" };
+          tickerResultCache.set(tickerCacheKey, { result: tickerResult, timestamp: Date.now() });
+          return tickerResult;
+        } else if (result && !result.success) {
+          console.warn(`[${exchange.toUpperCase()}] Ticker API failed for ${symbol}: ${result.error} (${result.errorCode})`);
+          dataError = result.error;
+          lastDataError = result.error;
+          handleRateLimitError(exchange, result.error || "");
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : "Unknown error";
         console.warn(`[${exchange.toUpperCase()}] Live ticker API exception for ${symbol}: ${errorMsg}`);
         dataError = errorMsg;
         lastDataError = errorMsg;
+        handleRateLimitError(exchange, errorMsg);
       }
     }
     
     // Fallback to simulated ticker
     lastDataSource = "simulated";
     const ticker = generateSimulatedTicker(exchange, symbol);
-    return { ticker, dataSource: "simulated", dataError };
+    const fallbackResult: TickerResult = { ticker, dataSource: "simulated", dataError };
+    tickerResultCache.set(tickerCacheKey, { result: fallbackResult, timestamp: Date.now() });
+    return fallbackResult;
   },
 
   async getKlines(exchange: Exchange, symbol: string, timeframe: string, limit: number = 100): Promise<KlinesResult> {
+    const klinesCacheKey = `${exchange}:${symbol}:${timeframe}:${limit}`;
+    
+    // Check klines result cache first - prevents duplicate API calls within TTL
+    const cachedResult = klinesResultCache.get(klinesCacheKey);
+    if (cachedResult && Date.now() - cachedResult.timestamp < KLINES_CACHE_TTL) {
+      return cachedResult.result;
+    }
+    
     let dataError: string | undefined;
     
     if (USE_LIVE_API) {
       try {
+        // Wait for rate limit before making request
+        await waitForRateLimit(exchange);
+        
+        let result: { success: boolean; data: any; error?: string; errorCode?: string } | null = null;
+        
         if (exchange === "coinstore") {
-          const result = await getCoinstoreKlines(symbol, timeframe, limit);
-          if (result.success && result.data && result.data.length > 0) {
-            lastDataSource = "live";
-            lastDataError = undefined;
-            console.log(`[COINSTORE] Live klines for ${symbol}: ${result.data.length} candles`);
-            return { klines: result.data, dataSource: "live" };
-          } else if (!result.success) {
-            console.warn(`[COINSTORE] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
-            dataError = result.error;
-            lastDataError = result.error;
-          }
+          result = await getCoinstoreKlines(symbol, timeframe, limit);
         } else if (exchange === "bydfi") {
-          const result = await getBydfiKlines(symbol, timeframe, limit);
-          if (result.success && result.data && result.data.length > 0) {
-            lastDataSource = "live";
-            lastDataError = undefined;
-            console.log(`[BYDFI] Live klines for ${symbol}: ${result.data.length} candles`);
-            return { klines: result.data, dataSource: "live" };
-          } else if (!result.success) {
-            console.warn(`[BYDFI] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
-            dataError = result.error;
-            lastDataError = result.error;
-          }
+          result = await getBydfiKlines(symbol, timeframe, limit);
         } else if (exchange === "bitunix") {
-          const result = await getBitunixKlines(symbol, timeframe, limit);
-          if (result.success && result.data && result.data.length > 0) {
-            lastDataSource = "live";
-            lastDataError = undefined;
-            console.log(`[BITUNIX] Live klines for ${symbol}: ${result.data.length} candles`);
-            return { klines: result.data, dataSource: "live" };
-          } else if (!result.success) {
-            console.warn(`[BITUNIX] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
-            dataError = result.error;
-            lastDataError = result.error;
-          }
+          result = await getBitunixKlines(symbol, timeframe, limit);
         } else if (exchange === "toobit") {
-          const result = await getToobitKlines(symbol, timeframe, limit);
-          if (result.success && result.data && result.data.length > 0) {
-            lastDataSource = "live";
-            lastDataError = undefined;
-            console.log(`[TOOBIT] Live klines for ${symbol}: ${result.data.length} candles`);
-            return { klines: result.data, dataSource: "live" };
-          } else if (!result.success) {
-            console.warn(`[TOOBIT] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
-            dataError = result.error;
-            lastDataError = result.error;
-          }
+          result = await getToobitKlines(symbol, timeframe, limit);
+        }
+        
+        if (result?.success && result.data && result.data.length > 0) {
+          lastDataSource = "live";
+          lastDataError = undefined;
+          clearRateLimitBackoff(exchange);
+          console.log(`[${exchange.toUpperCase()}] Live klines for ${symbol}: ${result.data.length} candles`);
+          
+          const klinesResult: KlinesResult = { klines: result.data, dataSource: "live" };
+          klinesResultCache.set(klinesCacheKey, { result: klinesResult, timestamp: Date.now() });
+          return klinesResult;
+        } else if (result && !result.success) {
+          console.warn(`[${exchange.toUpperCase()}] Klines API failed for ${symbol}: ${result.error} (${result.errorCode})`);
+          dataError = result.error;
+          lastDataError = result.error;
+          handleRateLimitError(exchange, result.error || "");
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : "Unknown error";
         console.warn(`[${exchange.toUpperCase()}] Live klines API exception for ${symbol}: ${errorMsg}`);
         dataError = errorMsg;
         lastDataError = errorMsg;
+        handleRateLimitError(exchange, errorMsg);
       }
     }
     
     // Fallback to simulated klines
     lastDataSource = "simulated";
     const klines = generateSimulatedKlines(exchange, symbol, timeframe, limit);
-    return { klines, dataSource: "simulated", dataError };
+    const fallbackResult: KlinesResult = { klines, dataSource: "simulated", dataError };
+    klinesResultCache.set(klinesCacheKey, { result: fallbackResult, timestamp: Date.now() });
+    return fallbackResult;
   },
 
   async getPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]> {
@@ -703,11 +767,12 @@ export interface TickerStreamData {
 }
 
 // Function to continuously update ticker data (for WebSocket simulation)
+// NOTE: Default interval increased from 1000ms to 2000ms to reduce API rate limiting issues
 export function createTickerStream(
   exchange: Exchange,
   symbol: string,
   callback: (data: TickerStreamData) => void,
-  intervalMs: number = 1000
+  intervalMs: number = 2000
 ): { stop: () => void } {
   const fetchTicker = async () => {
     try {
