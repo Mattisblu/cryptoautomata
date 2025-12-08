@@ -30,7 +30,8 @@ import type {
   InsertRunningStrategy,
   RunningStrategyStatus,
 } from "@shared/schema";
-import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies, algorithms } from "@shared/schema";
+import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies, algorithms, livePositions, liveOrders } from "@shared/schema";
+import type { PositionSide, OrderType, OrderSide, OrderStatus } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 
@@ -167,8 +168,7 @@ export class MemStorage implements IStorage {
   private markets: Map<Exchange, Market[]> = new Map();
   private tickers: Map<string, Ticker> = new Map();
   private klines: Map<string, Kline[]> = new Map();
-  private positions: Map<Exchange, Position[]> = new Map();
-  private orders: Map<Exchange, Order[]> = new Map();
+  // Note: positions and orders are now stored in the database for persistence
   private stopOrders: Map<Exchange, StopOrder[]> = new Map();
   // Note: algorithms are now stored in the database, not in-memory
   private chatMessages: ChatMessage[] = [];
@@ -234,59 +234,198 @@ export class MemStorage implements IStorage {
     this.klines.set(key, existing);
   }
 
-  // Positions
+  // Positions (Database-backed for persistence)
   async getPositions(exchange: Exchange): Promise<Position[]> {
-    return this.positions.get(exchange) || [];
+    const rows = await db.select().from(livePositions).where(eq(livePositions.exchange, exchange));
+    return rows.map(r => ({
+      id: r.id,
+      symbol: r.symbol,
+      side: r.side as PositionSide,
+      entryPrice: r.entryPrice,
+      markPrice: r.markPrice,
+      quantity: r.quantity,
+      leverage: r.leverage,
+      marginType: r.marginType as "isolated" | "cross",
+      unrealizedPnl: r.unrealizedPnl,
+      unrealizedPnlPercent: r.unrealizedPnlPercent,
+      liquidationPrice: r.liquidationPrice,
+      timestamp: r.timestamp.getTime(),
+      stopLossPrice: r.stopLossPrice ?? undefined,
+      takeProfitPrice: r.takeProfitPrice ?? undefined,
+      trailingStopDistance: r.trailingStopDistance ?? undefined,
+      stopOrderId: r.stopOrderId ?? undefined,
+      takeProfitOrderId: r.takeProfitOrderId ?? undefined,
+      trailingStopOrderId: r.trailingStopOrderId ?? undefined,
+    }));
   }
 
   async getPosition(exchange: Exchange, id: string): Promise<Position | null> {
-    const positions = this.positions.get(exchange) || [];
-    return positions.find(p => p.id === id) || null;
+    const [row] = await db.select().from(livePositions)
+      .where(and(eq(livePositions.exchange, exchange), eq(livePositions.id, id)));
+    if (!row) return null;
+    return {
+      id: row.id,
+      symbol: row.symbol,
+      side: row.side as PositionSide,
+      entryPrice: row.entryPrice,
+      markPrice: row.markPrice,
+      quantity: row.quantity,
+      leverage: row.leverage,
+      marginType: row.marginType as "isolated" | "cross",
+      unrealizedPnl: row.unrealizedPnl,
+      unrealizedPnlPercent: row.unrealizedPnlPercent,
+      liquidationPrice: row.liquidationPrice,
+      timestamp: row.timestamp.getTime(),
+      stopLossPrice: row.stopLossPrice ?? undefined,
+      takeProfitPrice: row.takeProfitPrice ?? undefined,
+      trailingStopDistance: row.trailingStopDistance ?? undefined,
+      stopOrderId: row.stopOrderId ?? undefined,
+      takeProfitOrderId: row.takeProfitOrderId ?? undefined,
+      trailingStopOrderId: row.trailingStopOrderId ?? undefined,
+    };
   }
 
   async setPositions(exchange: Exchange, positions: Position[]): Promise<void> {
-    this.positions.set(exchange, positions);
+    await db.delete(livePositions).where(eq(livePositions.exchange, exchange));
+    if (positions.length > 0) {
+      await db.insert(livePositions).values(positions.map(p => ({
+        id: p.id,
+        exchange: exchange,
+        symbol: p.symbol,
+        side: p.side,
+        entryPrice: p.entryPrice,
+        markPrice: p.markPrice,
+        quantity: p.quantity,
+        leverage: p.leverage,
+        marginType: p.marginType,
+        unrealizedPnl: p.unrealizedPnl,
+        unrealizedPnlPercent: p.unrealizedPnlPercent,
+        liquidationPrice: p.liquidationPrice,
+        stopLossPrice: p.stopLossPrice ?? null,
+        takeProfitPrice: p.takeProfitPrice ?? null,
+        trailingStopDistance: p.trailingStopDistance ?? null,
+        stopOrderId: p.stopOrderId ?? null,
+        takeProfitOrderId: p.takeProfitOrderId ?? null,
+        trailingStopOrderId: p.trailingStopOrderId ?? null,
+        timestamp: new Date(p.timestamp),
+      })));
+    }
   }
 
   async updatePosition(exchange: Exchange, position: Position): Promise<void> {
-    const positions = this.positions.get(exchange) || [];
-    const index = positions.findIndex(p => p.id === position.id);
-    if (index >= 0) {
-      positions[index] = position;
+    const existing = await this.getPosition(exchange, position.id);
+    if (existing) {
+      await db.update(livePositions)
+        .set({
+          symbol: position.symbol,
+          side: position.side,
+          entryPrice: position.entryPrice,
+          markPrice: position.markPrice,
+          quantity: position.quantity,
+          leverage: position.leverage,
+          marginType: position.marginType,
+          unrealizedPnl: position.unrealizedPnl,
+          unrealizedPnlPercent: position.unrealizedPnlPercent,
+          liquidationPrice: position.liquidationPrice,
+          stopLossPrice: position.stopLossPrice ?? null,
+          takeProfitPrice: position.takeProfitPrice ?? null,
+          trailingStopDistance: position.trailingStopDistance ?? null,
+          stopOrderId: position.stopOrderId ?? null,
+          takeProfitOrderId: position.takeProfitOrderId ?? null,
+          trailingStopOrderId: position.trailingStopOrderId ?? null,
+          timestamp: new Date(position.timestamp),
+        })
+        .where(eq(livePositions.id, position.id));
     } else {
-      positions.push(position);
+      await db.insert(livePositions).values({
+        id: position.id,
+        exchange: exchange,
+        symbol: position.symbol,
+        side: position.side,
+        entryPrice: position.entryPrice,
+        markPrice: position.markPrice,
+        quantity: position.quantity,
+        leverage: position.leverage,
+        marginType: position.marginType,
+        unrealizedPnl: position.unrealizedPnl,
+        unrealizedPnlPercent: position.unrealizedPnlPercent,
+        liquidationPrice: position.liquidationPrice,
+        stopLossPrice: position.stopLossPrice ?? null,
+        takeProfitPrice: position.takeProfitPrice ?? null,
+        trailingStopDistance: position.trailingStopDistance ?? null,
+        stopOrderId: position.stopOrderId ?? null,
+        takeProfitOrderId: position.takeProfitOrderId ?? null,
+        trailingStopOrderId: position.trailingStopOrderId ?? null,
+        timestamp: new Date(position.timestamp),
+      });
     }
-    this.positions.set(exchange, positions);
   }
 
   async deletePosition(exchange: Exchange, id: string): Promise<void> {
-    const positions = this.positions.get(exchange) || [];
-    this.positions.set(exchange, positions.filter(p => p.id !== id));
+    await db.delete(livePositions).where(and(eq(livePositions.exchange, exchange), eq(livePositions.id, id)));
   }
 
-  // Orders
+  // Orders (Database-backed for persistence)
   async getOrders(exchange: Exchange): Promise<Order[]> {
-    return this.orders.get(exchange) || [];
+    const rows = await db.select().from(liveOrders).where(eq(liveOrders.exchange, exchange));
+    return rows.map(r => ({
+      id: r.id,
+      symbol: r.symbol,
+      type: r.type as OrderType,
+      side: r.side as OrderSide,
+      price: r.price,
+      quantity: r.quantity,
+      filledQuantity: r.filledQuantity,
+      status: r.status as OrderStatus,
+      timestamp: r.timestamp.getTime(),
+    }));
   }
 
   async getOrder(exchange: Exchange, id: string): Promise<Order | null> {
-    const orders = this.orders.get(exchange) || [];
-    return orders.find(o => o.id === id) || null;
+    const [row] = await db.select().from(liveOrders)
+      .where(and(eq(liveOrders.exchange, exchange), eq(liveOrders.id, id)));
+    if (!row) return null;
+    return {
+      id: row.id,
+      symbol: row.symbol,
+      type: row.type as OrderType,
+      side: row.side as OrderSide,
+      price: row.price,
+      quantity: row.quantity,
+      filledQuantity: row.filledQuantity,
+      status: row.status as OrderStatus,
+      timestamp: row.timestamp.getTime(),
+    };
   }
 
   async addOrder(exchange: Exchange, order: Order): Promise<void> {
-    const orders = this.orders.get(exchange) || [];
-    orders.push(order);
-    this.orders.set(exchange, orders);
+    await db.insert(liveOrders).values({
+      id: order.id,
+      exchange: exchange,
+      symbol: order.symbol,
+      type: order.type,
+      side: order.side,
+      price: order.price,
+      quantity: order.quantity,
+      filledQuantity: order.filledQuantity,
+      status: order.status,
+      timestamp: new Date(order.timestamp),
+    });
   }
 
   async updateOrder(exchange: Exchange, order: Order): Promise<void> {
-    const orders = this.orders.get(exchange) || [];
-    const index = orders.findIndex(o => o.id === order.id);
-    if (index >= 0) {
-      orders[index] = order;
-      this.orders.set(exchange, orders);
-    }
+    await db.update(liveOrders)
+      .set({
+        symbol: order.symbol,
+        type: order.type,
+        side: order.side,
+        price: order.price,
+        quantity: order.quantity,
+        filledQuantity: order.filledQuantity,
+        status: order.status,
+        timestamp: new Date(order.timestamp),
+      })
+      .where(eq(liveOrders.id, order.id));
   }
 
   // Stop Orders (SL/TP/Trailing)
