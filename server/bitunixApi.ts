@@ -285,10 +285,18 @@ export async function validateBitunixCredentials(
   credentials: ApiCredentials
 ): Promise<boolean> {
   try {
-    const headers = createBitunixHeaders(credentials);
-    const url = `${BITUNIX_FUTURES_URL}/api/v1/futures/account`;
+    // For the account endpoint, we need to pass marginCoin parameter
+    // Query params must be in format: key1value1key2value2 (no = or &)
+    const marginCoin = "USDT";
+    const queryParamsForSignature = `marginCoin${marginCoin}`;
+    const queryStringForUrl = `marginCoin=${marginCoin}`;
+    
+    const headers = createBitunixHeaders(credentials, queryParamsForSignature);
+    const url = `${BITUNIX_FUTURES_URL}/api/v1/futures/account?${queryStringForUrl}`;
 
     console.log("[BITUNIX] Validating credentials with endpoint:", url);
+    console.log("[BITUNIX] Query params for signature:", queryParamsForSignature);
+    console.log("[BITUNIX] Headers:", JSON.stringify(headers));
 
     const response = await fetchWithTimeout(url, {
       method: "GET",
