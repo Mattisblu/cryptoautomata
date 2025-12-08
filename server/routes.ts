@@ -46,11 +46,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const wsStreams = clientStreams.get(ws);
           
           if (wsStreams) {
-            // Stop existing stream for this client on this symbol if any
-            if (wsStreams.has(streamKey)) {
-              wsStreams.get(streamKey)?.stop();
-              console.log(`Stopped existing ticker stream for ${streamKey}`);
-            }
+            // Stop ALL existing streams for this client - only one market should be active at a time
+            wsStreams.forEach((stream, existingKey) => {
+              stream.stop();
+              console.log(`Stopped ticker stream for ${existingKey} (switching to ${streamKey})`);
+            });
+            wsStreams.clear();
 
             // Start new ticker stream for this client
             const stream = createTickerStream(
