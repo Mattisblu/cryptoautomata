@@ -265,19 +265,25 @@ export async function validateBitunixCredentials(
     const headers = createBitunixHeaders(credentials);
     const url = `${BITUNIX_FUTURES_URL}/api/v1/futures/account`;
 
+    console.log("[BITUNIX] Validating credentials with endpoint:", url);
+
     const response = await fetchWithTimeout(url, {
       method: "GET",
       headers,
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      return data.code === 0;
+    const data = await response.json();
+    console.log("[BITUNIX] Validation response:", JSON.stringify(data));
+
+    if (response.ok && data.code === 0) {
+      console.log("[BITUNIX] Credentials validated successfully");
+      return true;
     }
 
+    console.warn("[BITUNIX] Validation failed - code:", data.code, "msg:", data.msg);
     return false;
   } catch (error) {
-    console.warn("Bitunix credential validation failed:", error);
+    console.warn("[BITUNIX] Credential validation error:", error);
     return false;
   }
 }
