@@ -8,6 +8,8 @@ import { analyzeAndRespond } from "./openai";
 import { tradingBot } from "./tradingBot";
 import { strategyOrchestrator } from "./strategyOrchestrator";
 import { notificationService } from "./notificationService";
+import { getCoinstoreBalance } from "./coinstoreApi";
+import { getBydfiBalance } from "./bydfiApi";
 import { apiCredentialsSchema, manualOrderSchema, riskParametersSchema, insertTradeSchema } from "@shared/schema";
 import type { Exchange, TradeCycleState, StopOrder, RunningStrategyStatus } from "@shared/schema";
 import { z } from "zod";
@@ -154,6 +156,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.clearCredentials(exchange as Exchange);
       }
       res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Get account balance
+  app.get("/api/balance", async (req, res) => {
+    try {
+      const exchange = req.query.exchange as Exchange;
+      if (!exchange) {
+        return res.status(400).json({ success: false, error: "Exchange required" });
+      }
+
+      const credentials = await storage.getCredentials(exchange);
+      if (!credentials) {
+        return res.status(401).json({ success: false, error: "Not authenticated" });
+      }
+
+      let result;
+      if (exchange === "coinstore") {
+        result = await getCoinstoreBalance(credentials);
+      } else if (exchange === "bydfi") {
+        result = await getBydfiBalance(credentials);
+      } else {
+        return res.status(400).json({ success: false, error: "Unsupported exchange" });
+      }
+
+      if (!result.success) {
+        return res.status(500).json({ 
+          success: false, 
+          error: result.error || "Failed to fetch balance" 
+        });
+      }
+
+      res.json({ success: true, balances: result.data });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }

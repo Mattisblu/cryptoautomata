@@ -127,6 +127,7 @@ shared/
 ### Authentication
 - `POST /api/auth/connect` - Connect exchange API credentials
 - `POST /api/auth/disconnect` - Disconnect and clear credentials
+- `GET /api/balance?exchange=coinstore` - Get account balance (USDT available, frozen, unrealized PnL, margin)
 
 ### Market Data
 - `GET /api/exchange-info?exchange=coinstore` - Get exchange configuration

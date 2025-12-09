@@ -17,9 +17,19 @@ import {
 } from "@/components/ui/form";
 import { useTradingContext } from "@/lib/tradingContext";
 import { apiCredentialsSchema, type ApiCredentials } from "@shared/schema";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Wallet, RefreshCw } from "lucide-react";
+
+interface ExchangeBalance {
+  asset: string;
+  available: number;
+  frozen: number;
+  total: number;
+  unrealizedPnl: number;
+  marginBalance: number;
+}
 
 export function CredentialsForm() {
   const { selectedExchange, setCredentials, setConnectionState, isAuthenticated, credentials } = useTradingContext();
@@ -97,6 +107,21 @@ export function CredentialsForm() {
     });
   };
 
+  const balanceQuery = useQuery<{ success: boolean; balances: ExchangeBalance[] }>({
+    queryKey: ['/api/balance', credentials?.exchange],
+    queryFn: async () => {
+      const res = await fetch(`/api/balance?exchange=${credentials?.exchange}`);
+      if (!res.ok) {
+        throw new Error('Failed to fetch balance');
+      }
+      return res.json();
+    },
+    enabled: isAuthenticated && !!credentials?.exchange,
+    refetchInterval: 30000,
+  });
+
+  const usdtBalance = balanceQuery.data?.balances?.find(b => b.asset === 'USDT');
+
   if (isAuthenticated && credentials) {
     return (
       <Card data-testid="credentials-connected">
@@ -116,6 +141,72 @@ export function CredentialsForm() {
               Active Connection
             </span>
           </div>
+          
+          <div className="p-3 bg-muted/50 rounded-md space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Account Balance</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => balanceQuery.refetch()}
+                disabled={balanceQuery.isFetching}
+                data-testid="button-refresh-balance"
+              >
+                <RefreshCw className={`h-3 w-3 ${balanceQuery.isFetching ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
+            
+            {balanceQuery.isLoading ? (
+              <div className="flex items-center justify-center py-2">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : balanceQuery.isError ? (
+              <div className="text-xs text-muted-foreground text-center py-1">
+                Balance unavailable
+              </div>
+            ) : usdtBalance ? (
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Available</span>
+                  <span className="font-mono font-medium text-profit" data-testid="text-balance-available">
+                    {usdtBalance.available.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
+                  </span>
+                </div>
+                {usdtBalance.frozen > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Frozen</span>
+                    <span className="font-mono text-warning" data-testid="text-balance-frozen">
+                      {usdtBalance.frozen.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
+                    </span>
+                  </div>
+                )}
+                {usdtBalance.unrealizedPnl !== 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Unrealized PnL</span>
+                    <span className={`font-mono ${usdtBalance.unrealizedPnl >= 0 ? 'text-profit' : 'text-loss'}`} data-testid="text-balance-pnl">
+                      {usdtBalance.unrealizedPnl >= 0 ? '+' : ''}{usdtBalance.unrealizedPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
+                    </span>
+                  </div>
+                )}
+                <div className="pt-1 border-t border-border/50">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Margin Balance</span>
+                    <span className="font-mono font-semibold" data-testid="text-balance-margin">
+                      {usdtBalance.marginBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground text-center py-1">
+                No USDT balance found
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">API Key</span>
