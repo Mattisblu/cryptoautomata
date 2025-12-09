@@ -300,6 +300,100 @@ export async function validateBydfiCredentials(credentials: ApiCredentials): Pro
   }
 }
 
+// Balance info types
+export interface ExchangeBalance {
+  asset: string;
+  available: number;
+  frozen: number;
+  total: number;
+  unrealizedPnl: number;
+  marginBalance: number;
+}
+
+export async function getBydfiBalance(credentials: ApiCredentials): Promise<ApiResult<ExchangeBalance[]>> {
+  try {
+    const path = "/api/v1/futures/account";
+    const headers = createBydfiHeaders(credentials, "GET", path);
+    
+    const response = await fetchWithTimeout(
+      `${BYDFI_BASE_URL}${path}`,
+      { headers }
+    );
+    
+    if (!response.ok) {
+      return {
+        success: false,
+        data: null,
+        error: `BYDFI balance API returned status ${response.status}`,
+        errorCode: "HTTP_ERROR"
+      };
+    }
+    
+    const data = await response.json();
+    
+    if (data.code !== 0 && data.code !== "0") {
+      return {
+        success: false,
+        data: null,
+        error: data.message || "Failed to fetch balance",
+        errorCode: "API_ERROR"
+      };
+    }
+    
+    // Parse balance data from BYDFI account endpoint
+    const balances: ExchangeBalance[] = [];
+    const accountData = data.data || data;
+    
+    if (accountData.assets && Array.isArray(accountData.assets)) {
+      // Array of asset balances
+      for (const item of accountData.assets) {
+        const available = parseFloat(item.availableBalance || item.available || item.free || "0");
+        const frozen = parseFloat(item.frozenBalance || item.frozen || item.locked || "0");
+        const unrealizedPnl = parseFloat(item.unrealizedPnl || item.unrealizedProfit || "0");
+        const marginBalance = parseFloat(item.marginBalance || item.walletBalance || "0");
+        
+        balances.push({
+          asset: item.asset || item.currency || "USDT",
+          available,
+          frozen,
+          total: available + frozen,
+          unrealizedPnl,
+          marginBalance: marginBalance || (available + frozen + unrealizedPnl),
+        });
+      }
+    } else {
+      // Single account object with balance fields
+      const available = parseFloat(accountData.availableBalance || accountData.available || "0");
+      const frozen = parseFloat(accountData.frozenBalance || accountData.frozen || accountData.positionInitialMargin || "0");
+      const unrealizedPnl = parseFloat(accountData.unrealizedPnl || accountData.unrealizedProfit || "0");
+      const marginBalance = parseFloat(accountData.totalMarginBalance || accountData.marginBalance || accountData.totalWalletBalance || "0");
+      
+      balances.push({
+        asset: accountData.asset || "USDT",
+        available,
+        frozen,
+        total: available + frozen,
+        unrealizedPnl,
+        marginBalance: marginBalance || (available + frozen + unrealizedPnl),
+      });
+    }
+    
+    return {
+      success: true,
+      data: balances
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[BYDFI] Failed to fetch balance:", errorMessage);
+    return {
+      success: false,
+      data: null,
+      error: `Failed to fetch BYDFI balance: ${errorMessage}`,
+      errorCode: "NETWORK_ERROR"
+    };
+  }
+}
+
 let allTickersCache: Map<string, Ticker> = new Map();
 let allTickersCacheTime = 0;
 

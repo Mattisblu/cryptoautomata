@@ -396,3 +396,96 @@ export async function validateCoinstoreCredentials(credentials: ApiCredentials):
     return false;
   }
 }
+
+// Balance info types
+export interface ExchangeBalance {
+  asset: string;
+  available: number;
+  frozen: number;
+  total: number;
+  unrealizedPnl: number;
+  marginBalance: number;
+}
+
+export async function getCoinstoreBalance(credentials: ApiCredentials): Promise<ApiResult<ExchangeBalance[]>> {
+  try {
+    const payload = "";
+    const headers = createAuthHeaders(credentials, payload);
+    
+    const response = await fetchWithTimeout(
+      `${COINSTORE_FUTURES_BASE_URL}/user/balance`,
+      { headers }
+    );
+    
+    if (!response.ok) {
+      return {
+        success: false,
+        data: null,
+        error: `Coinstore balance API returned status ${response.status}`,
+        errorCode: "HTTP_ERROR"
+      };
+    }
+    
+    const data = await response.json();
+    
+    if (data.code !== "0" && data.code !== 0) {
+      return {
+        success: false,
+        data: null,
+        error: data.message || "Failed to fetch balance",
+        errorCode: "API_ERROR"
+      };
+    }
+    
+    // Parse balance data - Coinstore returns array of asset balances
+    const balances: ExchangeBalance[] = [];
+    const balanceData = data.data || [];
+    
+    if (Array.isArray(balanceData)) {
+      for (const item of balanceData) {
+        const available = parseFloat(item.availableBalance || item.available || item.free || "0");
+        const frozen = parseFloat(item.frozenBalance || item.frozen || item.locked || "0");
+        const unrealizedPnl = parseFloat(item.unrealizedPnl || item.unrealizedProfit || "0");
+        const marginBalance = parseFloat(item.marginBalance || item.balance || "0");
+        
+        balances.push({
+          asset: item.asset || item.currency || item.coin || "USDT",
+          available,
+          frozen,
+          total: available + frozen,
+          unrealizedPnl,
+          marginBalance: marginBalance || (available + frozen + unrealizedPnl),
+        });
+      }
+    } else if (typeof balanceData === "object") {
+      // Sometimes balance is returned as a single object
+      const available = parseFloat(balanceData.availableBalance || balanceData.available || balanceData.free || "0");
+      const frozen = parseFloat(balanceData.frozenBalance || balanceData.frozen || balanceData.locked || "0");
+      const unrealizedPnl = parseFloat(balanceData.unrealizedPnl || balanceData.unrealizedProfit || "0");
+      const marginBalance = parseFloat(balanceData.marginBalance || balanceData.balance || "0");
+      
+      balances.push({
+        asset: balanceData.asset || balanceData.currency || "USDT",
+        available,
+        frozen,
+        total: available + frozen,
+        unrealizedPnl,
+        marginBalance: marginBalance || (available + frozen + unrealizedPnl),
+      });
+    }
+    
+    return {
+      success: true,
+      data: balances
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[COINSTORE] Failed to fetch balance:", errorMessage);
+    return {
+      success: false,
+      data: null,
+      error: `Failed to fetch Coinstore balance: ${errorMessage}`,
+      errorCode: "NETWORK_ERROR"
+    };
+  }
+}
