@@ -499,6 +499,20 @@ class StrategyOrchestrator {
       } else if (condition.includes("macd below signal")) {
         if (macd.macdLine < macd.signalLine) shouldTrigger = true;
       }
+      // Histogram momentum conditions (point 3: swelling/shrinking bars)
+      else if (condition.includes("histogram swelling") || condition.includes("momentum increasing") || condition.includes("bars increasing")) {
+        if (macd.histogramMomentum === "swelling") shouldTrigger = true;
+      } else if (condition.includes("histogram shrinking") || condition.includes("momentum decreasing") || condition.includes("bars decreasing")) {
+        if (macd.histogramMomentum === "shrinking") shouldTrigger = true;
+      }
+      // Divergence conditions (point 8: price vs MACD disagreement)
+      else if (condition.includes("bullish divergence") || condition.includes("positive divergence")) {
+        if (macd.divergence === "bullish_divergence") shouldTrigger = true;
+      } else if (condition.includes("bearish divergence") || condition.includes("negative divergence")) {
+        if (macd.divergence === "bearish_divergence") shouldTrigger = true;
+      } else if (condition.includes("divergence detected") || condition.includes("any divergence")) {
+        if (macd.divergence !== "none") shouldTrigger = true;
+      }
 
       // --- Volume Conditions ---
       else if (condition.includes("volume spike") || condition.includes("high volume spike")) {
@@ -548,8 +562,10 @@ class StrategyOrchestrator {
         if (triggerDebugInfo) {
           reason += ` | ${triggerDebugInfo}`;
         }
-        if (condition.includes("macd")) {
+        if (condition.includes("macd") || condition.includes("histogram") || condition.includes("divergence") || condition.includes("momentum")) {
           reason += ` | MACD: ${macd.macdLine.toFixed(4)}, Signal: ${macd.signalLine.toFixed(4)}, Histogram: ${macd.histogram.toFixed(4)}, Trend: ${macd.trend}`;
+          reason += `, HistMomentum: ${macd.histogramMomentum}, Divergence: ${macd.divergence}`;
+          reason += `, AboveZero: ${macd.macdAboveZero}, BelowZero: ${macd.macdBelowZero}`;
         }
         if (condition.includes("volume")) {
           reason += ` | Volume: ${volume.volumeRatio.toFixed(2)}x avg, Trend: ${volume.volumeTrend}`;
@@ -600,15 +616,29 @@ class StrategyOrchestrator {
   // MACD Line: 12-period EMA minus 26-period EMA (shows momentum)
   // Signal Line: 9-period EMA of the MACD Line (trigger for trades)
   // Histogram: MACD Line minus Signal Line (shows momentum strength)
+  // Histogram Momentum: Swelling (increasing) vs Shrinking (decreasing) bars
+  // Divergence: When price and MACD move in opposite directions (trend reversal signal)
   private calculateMACD(closes: number[], fastPeriod = 12, slowPeriod = 26, signalPeriod = 9): {
     macdLine: number;
     signalLine: number;
     histogram: number;
+    previousHistogram: number;
     trend: "bullish" | "bearish" | "neutral";
     crossover: "bullish_crossover" | "bearish_crossover" | "none";
+    histogramMomentum: "swelling" | "shrinking" | "stable";
+    divergence: "bullish_divergence" | "bearish_divergence" | "none";
+    macdAboveZero: boolean;
+    macdBelowZero: boolean;
   } {
+    const defaultResult = { 
+      macdLine: 0, signalLine: 0, histogram: 0, previousHistogram: 0,
+      trend: "neutral" as const, crossover: "none" as const,
+      histogramMomentum: "stable" as const, divergence: "none" as const,
+      macdAboveZero: false, macdBelowZero: false
+    };
+    
     if (closes.length < slowPeriod + signalPeriod) {
-      return { macdLine: 0, signalLine: 0, histogram: 0, trend: "neutral", crossover: "none" };
+      return defaultResult;
     }
 
     // Calculate EMAs: 12-period (fast) and 26-period (slow)
@@ -616,7 +646,7 @@ class StrategyOrchestrator {
     const ema26 = this.calculateEMA(closes, slowPeriod);
     
     if (ema12.length === 0 || ema26.length === 0) {
-      return { macdLine: 0, signalLine: 0, histogram: 0, trend: "neutral", crossover: "none" };
+      return defaultResult;
     }
 
     // Calculate MACD line (difference between fast and slow EMA)
@@ -632,14 +662,14 @@ class StrategyOrchestrator {
     }
 
     if (macdLineArray.length < signalPeriod) {
-      return { macdLine: 0, signalLine: 0, histogram: 0, trend: "neutral", crossover: "none" };
+      return defaultResult;
     }
 
     // Calculate signal line (9-period EMA of MACD line)
     const signalLineArray = this.calculateEMA(macdLineArray, signalPeriod);
     
     if (signalLineArray.length < 2) {
-      return { macdLine: 0, signalLine: 0, histogram: 0, trend: "neutral", crossover: "none" };
+      return defaultResult;
     }
 
     // Get current and previous values for crossover detection
@@ -648,6 +678,11 @@ class StrategyOrchestrator {
     const currentSignal = signalLineArray[signalLineArray.length - 1];
     const previousSignal = signalLineArray[signalLineArray.length - 2];
     const histogram = currentMacd - currentSignal;
+    const previousHistogram = previousMacd - previousSignal;
+
+    // MACD vs Zero Line (points 6 & 7)
+    const macdAboveZero = currentMacd > 0;
+    const macdBelowZero = currentMacd < 0;
 
     // Determine trend based on MACD vs Signal and histogram
     let trend: "bullish" | "bearish" | "neutral" = "neutral";
@@ -657,7 +692,7 @@ class StrategyOrchestrator {
       trend = "bearish";
     }
 
-    // Detect crossovers (buy/sell signals)
+    // Detect crossovers (buy/sell signals) - points 4 & 5
     let crossover: "bullish_crossover" | "bearish_crossover" | "none" = "none";
     if (previousMacd <= previousSignal && currentMacd > currentSignal) {
       crossover = "bullish_crossover"; // MACD crossed above signal - BUY signal
@@ -665,12 +700,89 @@ class StrategyOrchestrator {
       crossover = "bearish_crossover"; // MACD crossed below signal - SELL signal
     }
 
+    // Histogram momentum detection (point 3) - Swelling vs Shrinking bars
+    // Uses 3-bar comparison for more robust detection
+    // Swelling: Histogram bars are getting larger (momentum increasing)
+    // Shrinking: Histogram bars are getting smaller (momentum decreasing, possible reversal)
+    let histogramMomentum: "swelling" | "shrinking" | "stable" = "stable";
+    
+    // Calculate histogram array for multi-bar comparison
+    const histogramArray: number[] = [];
+    const minLen = Math.min(macdLineArray.length, signalLineArray.length);
+    for (let i = 0; i < minLen; i++) {
+      histogramArray.push(macdLineArray[macdLineArray.length - minLen + i] - signalLineArray[signalLineArray.length - minLen + i]);
+    }
+    
+    if (histogramArray.length >= 3) {
+      const h0 = Math.abs(histogramArray[histogramArray.length - 1]); // current
+      const h1 = Math.abs(histogramArray[histogramArray.length - 2]); // 1 bar ago
+      const h2 = Math.abs(histogramArray[histogramArray.length - 3]); // 2 bars ago
+      
+      // Swelling: bars increasing in size over 2+ periods
+      if (h0 > h1 && h1 > h2) {
+        histogramMomentum = "swelling";
+      }
+      // Shrinking: bars decreasing in size over 2+ periods
+      else if (h0 < h1 && h1 < h2) {
+        histogramMomentum = "shrinking";
+      }
+      // Also detect single-period changes with threshold
+      else {
+        const avgChange = ((h0 - h1) + (h1 - h2)) / 2;
+        const epsilon = 0.0001;
+        if (avgChange > epsilon) {
+          histogramMomentum = "swelling";
+        } else if (avgChange < -epsilon) {
+          histogramMomentum = "shrinking";
+        }
+      }
+    }
+
+    // Divergence detection (point 8) - Price vs MACD disagreement
+    // Bullish divergence: Price making lower lows but MACD making higher lows (reversal up)
+    // Bearish divergence: Price making higher highs but MACD making lower highs (reversal down)
+    let divergence: "bullish_divergence" | "bearish_divergence" | "none" = "none";
+    
+    // Need at least 10 periods to detect proper swing divergence patterns
+    if (closes.length >= 10 && macdLineArray.length >= 10) {
+      const lookback = 10;
+      const recentCloses = closes.slice(-lookback);
+      const recentMacd = macdLineArray.slice(-lookback);
+      
+      // Find local price highs and lows (swing points)
+      const priceHigh1 = Math.max(...recentCloses.slice(0, 5));
+      const priceHigh2 = Math.max(...recentCloses.slice(5));
+      const priceLow1 = Math.min(...recentCloses.slice(0, 5));
+      const priceLow2 = Math.min(...recentCloses.slice(5));
+      
+      const macdHigh1 = Math.max(...recentMacd.slice(0, 5));
+      const macdHigh2 = Math.max(...recentMacd.slice(5));
+      const macdLow1 = Math.min(...recentMacd.slice(0, 5));
+      const macdLow2 = Math.min(...recentMacd.slice(5));
+      
+      // Bullish divergence: Price making lower lows, MACD making higher lows
+      // This suggests underlying momentum is strengthening despite falling price
+      if (priceLow2 < priceLow1 && macdLow2 > macdLow1) {
+        divergence = "bullish_divergence";
+      }
+      // Bearish divergence: Price making higher highs, MACD making lower highs
+      // This suggests underlying momentum is weakening despite rising price
+      else if (priceHigh2 > priceHigh1 && macdHigh2 < macdHigh1) {
+        divergence = "bearish_divergence";
+      }
+    }
+
     return {
       macdLine: currentMacd,
       signalLine: currentSignal,
       histogram,
+      previousHistogram,
       trend,
       crossover,
+      histogramMomentum,
+      divergence,
+      macdAboveZero,
+      macdBelowZero,
     };
   }
 
