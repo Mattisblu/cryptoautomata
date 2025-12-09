@@ -369,6 +369,59 @@ class StrategyOrchestrator {
     }
   }
 
+  // Parse and evaluate numeric price conditions like "price > 0.14", "price >= 0.145", etc.
+  // Returns { matched: boolean, triggered: boolean, debugInfo: string }
+  private evaluateNumericCondition(
+    condition: string,
+    currentPrice: number
+  ): { matched: boolean; triggered: boolean; debugInfo: string } {
+    // Epsilon for floating-point comparison tolerance (0.0001% of price)
+    const EPSILON = currentPrice * 0.000001;
+    
+    // Pattern to match: price (>|>=|<|<=|==|=) number
+    // Supports: "price > 0.14", "price >= 0.145", "price < 100", "price == 50000"
+    const numericPattern = /price\s*(>=|<=|>|<|==|=)\s*([\d.]+)/i;
+    const match = condition.match(numericPattern);
+    
+    if (!match) {
+      return { matched: false, triggered: false, debugInfo: "" };
+    }
+    
+    const operator = match[1];
+    const targetPrice = parseFloat(match[2]);
+    
+    if (isNaN(targetPrice)) {
+      return { matched: true, triggered: false, debugInfo: `Invalid price value: ${match[2]}` };
+    }
+    
+    let triggered = false;
+    const diff = currentPrice - targetPrice;
+    
+    switch (operator) {
+      case ">":
+        triggered = currentPrice > targetPrice - EPSILON;
+        break;
+      case ">=":
+        triggered = currentPrice >= targetPrice - EPSILON;
+        break;
+      case "<":
+        triggered = currentPrice < targetPrice + EPSILON;
+        break;
+      case "<=":
+        triggered = currentPrice <= targetPrice + EPSILON;
+        break;
+      case "==":
+      case "=":
+        // Use same epsilon as other operators - very tight tolerance for equality
+        triggered = Math.abs(diff) <= Math.max(EPSILON, targetPrice * 0.000001);
+        break;
+    }
+    
+    const debugInfo = `[NumericTrigger] price=${currentPrice.toFixed(6)} ${operator} ${targetPrice} => ${triggered ? "TRIGGERED" : "not met"} (diff=${diff.toFixed(6)})`;
+    
+    return { matched: true, triggered, debugInfo };
+  }
+
   private async evaluateRules(
     rules: TradingAlgorithm["rules"],
     ticker: { lastPrice: number; priceChangePercent: number },
@@ -387,8 +440,18 @@ class StrategyOrchestrator {
     for (const rule of sortedRules) {
       const condition = rule.condition.toLowerCase();
       let shouldTrigger = false;
+      let triggerDebugInfo = "";
 
-      if (condition.includes("price above sma") && currentPrice > sma20) {
+      // --- NUMERIC PRICE CONDITIONS (highest priority) ---
+      // Parse direct price triggers like "price > 0.14", "price >= 100", etc.
+      const numericResult = this.evaluateNumericCondition(rule.condition, currentPrice);
+      if (numericResult.matched) {
+        shouldTrigger = numericResult.triggered;
+        triggerDebugInfo = numericResult.debugInfo;
+        console.log(`[StrategyOrchestrator] Rule "${rule.condition}": ${triggerDebugInfo}`);
+      }
+      // --- SMA Conditions ---
+      else if (condition.includes("price above sma") && currentPrice > sma20) {
         shouldTrigger = true;
       } else if (condition.includes("price below sma") && currentPrice < sma20) {
         shouldTrigger = true;
@@ -407,10 +470,14 @@ class StrategyOrchestrator {
       }
 
       if (shouldTrigger) {
+        const reason = triggerDebugInfo ? 
+          `Rule triggered: ${rule.condition} - ${triggerDebugInfo}` : 
+          `Rule triggered: ${rule.condition}`;
+        console.log(`[StrategyOrchestrator] TRIGGER FIRED: action=${rule.action}, reason=${reason}`);
         return {
           action: rule.action,
           rule,
-          reason: `Rule triggered: ${rule.condition}`,
+          reason,
         };
       }
     }
