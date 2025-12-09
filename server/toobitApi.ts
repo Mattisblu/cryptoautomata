@@ -278,3 +278,111 @@ export async function validateToobitCredentials(credentials: ApiCredentials): Pr
     return false;
   }
 }
+
+// Balance info types
+export interface ExchangeBalance {
+  asset: string;
+  available: number;
+  frozen: number;
+  total: number;
+  unrealizedPnl: number;
+  marginBalance: number;
+}
+
+export async function getToobitBalance(credentials: ApiCredentials): Promise<ApiResult<ExchangeBalance[]>> {
+  try {
+    const { queryString, headers } = createToobitSignedParams(credentials);
+    const url = `${TOOBIT_BASE_URL}/api/v1/spot/account?${queryString}`;
+
+    const response = await fetchWithTimeout(url, {
+      method: "GET",
+      headers,
+    });
+
+    if (!response.ok) {
+      return {
+        success: false,
+        data: null,
+        error: `Toobit balance API returned status ${response.status}`,
+        errorCode: "HTTP_ERROR"
+      };
+    }
+
+    const data = await response.json();
+
+    if (data.code !== 0 && data.code !== "0") {
+      return {
+        success: false,
+        data: null,
+        error: data.message || "Failed to fetch balance",
+        errorCode: "API_ERROR"
+      };
+    }
+
+    const balances: ExchangeBalance[] = [];
+    const accountBalances = data.data?.balances || data.balances || [];
+
+    if (Array.isArray(accountBalances)) {
+      for (const item of accountBalances) {
+        // Only include USDT balance for futures trading
+        const asset = item.asset || item.coin || "";
+        if (asset === "USDT" || !asset) {
+          const available = parseFloat(item.free || item.available || item.availableBalance || "0");
+          const frozen = parseFloat(item.locked || item.frozen || item.frozenBalance || "0");
+          const unrealizedPnl = parseFloat(item.unrealizedPnl || item.unrealizedProfit || "0");
+          const marginBalance = parseFloat(item.marginBalance || item.balance || "0");
+
+          balances.push({
+            asset: asset || "USDT",
+            available,
+            frozen,
+            total: available + frozen,
+            unrealizedPnl,
+            marginBalance: marginBalance || (available + frozen + unrealizedPnl),
+          });
+        }
+      }
+    } else if (typeof data.data === "object" && data.data) {
+      // Single balance object
+      const available = parseFloat(data.data.free || data.data.available || "0");
+      const frozen = parseFloat(data.data.locked || data.data.frozen || "0");
+      const unrealizedPnl = parseFloat(data.data.unrealizedPnl || "0");
+      const marginBalance = parseFloat(data.data.marginBalance || "0");
+
+      balances.push({
+        asset: data.data.asset || "USDT",
+        available,
+        frozen,
+        total: available + frozen,
+        unrealizedPnl,
+        marginBalance: marginBalance || (available + frozen + unrealizedPnl),
+      });
+    }
+
+    // If no USDT balance found, return empty with success
+    if (balances.length === 0) {
+      balances.push({
+        asset: "USDT",
+        available: 0,
+        frozen: 0,
+        total: 0,
+        unrealizedPnl: 0,
+        marginBalance: 0,
+      });
+    }
+
+    return {
+      success: true,
+      data: balances
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[TOOBIT] Failed to fetch balance:", errorMessage);
+    return {
+      success: false,
+      data: null,
+      error: `Failed to fetch Toobit balance: ${errorMessage}`,
+      errorCode: "NETWORK_ERROR"
+    };
+  }
+}

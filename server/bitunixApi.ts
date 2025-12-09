@@ -318,3 +318,83 @@ export async function validateBitunixCredentials(
     return false;
   }
 }
+
+// Balance info types
+export interface ExchangeBalance {
+  asset: string;
+  available: number;
+  frozen: number;
+  total: number;
+  unrealizedPnl: number;
+  marginBalance: number;
+}
+
+export async function getBitunixBalance(credentials: ApiCredentials): Promise<ApiResult<ExchangeBalance[]>> {
+  try {
+    const marginCoin = "USDT";
+    const queryParamsForSignature = `marginCoin${marginCoin}`;
+    const queryStringForUrl = `marginCoin=${marginCoin}`;
+    
+    const headers = createBitunixHeaders(credentials, queryParamsForSignature);
+    const url = `${BITUNIX_FUTURES_URL}/api/v1/futures/account?${queryStringForUrl}`;
+
+    const response = await fetchWithTimeout(url, {
+      method: "GET",
+      headers,
+    });
+
+    if (!response.ok) {
+      return {
+        success: false,
+        data: null,
+        error: `Bitunix balance API returned status ${response.status}`,
+        errorCode: "HTTP_ERROR"
+      };
+    }
+
+    const data = await response.json();
+
+    if (data.code !== 0) {
+      return {
+        success: false,
+        data: null,
+        error: data.msg || "Failed to fetch balance",
+        errorCode: "API_ERROR"
+      };
+    }
+
+    const balances: ExchangeBalance[] = [];
+    const accountData = data.data;
+
+    if (accountData) {
+      // Bitunix returns account info with available, frozen, unrealizedPnl, etc.
+      const available = parseFloat(accountData.available || accountData.availableBalance || "0");
+      const frozen = parseFloat(accountData.frozen || accountData.frozenBalance || "0");
+      const unrealizedPnl = parseFloat(accountData.unrealizedPnl || accountData.unrealizedProfit || "0");
+      const marginBalance = parseFloat(accountData.marginBalance || accountData.equity || "0");
+
+      balances.push({
+        asset: accountData.marginCoin || "USDT",
+        available,
+        frozen,
+        total: available + frozen,
+        unrealizedPnl,
+        marginBalance: marginBalance || (available + frozen + unrealizedPnl),
+      });
+    }
+
+    return {
+      success: true,
+      data: balances
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[BITUNIX] Failed to fetch balance:", errorMessage);
+    return {
+      success: false,
+      data: null,
+      error: `Failed to fetch Bitunix balance: ${errorMessage}`,
+      errorCode: "NETWORK_ERROR"
+    };
+  }
+}

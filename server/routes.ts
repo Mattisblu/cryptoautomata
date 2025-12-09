@@ -10,6 +10,8 @@ import { strategyOrchestrator } from "./strategyOrchestrator";
 import { notificationService } from "./notificationService";
 import { getCoinstoreBalance } from "./coinstoreApi";
 import { getBydfiBalance } from "./bydfiApi";
+import { getBitunixBalance } from "./bitunixApi";
+import { getToobitBalance } from "./toobitApi";
 import { apiCredentialsSchema, manualOrderSchema, riskParametersSchema, insertTradeSchema } from "@shared/schema";
 import type { Exchange, TradeCycleState, StopOrder, RunningStrategyStatus } from "@shared/schema";
 import { z } from "zod";
@@ -179,6 +181,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         result = await getCoinstoreBalance(credentials);
       } else if (exchange === "bydfi") {
         result = await getBydfiBalance(credentials);
+      } else if (exchange === "bitunix") {
+        result = await getBitunixBalance(credentials);
+      } else if (exchange === "toobit") {
+        result = await getToobitBalance(credentials);
       } else {
         return res.status(400).json({ success: false, error: "Unsupported exchange" });
       }
