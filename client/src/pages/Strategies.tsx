@@ -23,7 +23,8 @@ import {
   Activity,
   StopCircle,
   Zap,
-  Clock
+  Clock,
+  AlertTriangle
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -387,10 +388,17 @@ function RunningStrategyCard({
     ? Math.floor((Date.now() - new Date(strategy.startedAt).getTime()) / 1000 / 60) 
     : 0;
 
+  // Check if heartbeat is stale (over 60 seconds old)
+  const heartbeatAge = strategy.lastHeartbeat 
+    ? Math.floor((Date.now() - new Date(strategy.lastHeartbeat).getTime()) / 1000)
+    : 999;
+  const isStale = (isRunning || isPaused) && heartbeatAge > 60;
+
   return (
     <Card className={cn(
-      isRunning && "border-profit",
-      isPaused && "border-yellow-500"
+      isRunning && !isStale && "border-profit",
+      isPaused && !isStale && "border-yellow-500",
+      isStale && "border-destructive"
     )}>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -399,16 +407,27 @@ function RunningStrategyCard({
             <CardTitle className="text-base">{strategy.algorithmName || "Strategy"}</CardTitle>
           </div>
           <div className="flex items-center gap-2">
+            {isStale && (
+              <Badge 
+                variant="destructive"
+                className="text-xs"
+                title="This strategy may not be running - heartbeat is stale. Try stopping and restarting."
+              >
+                <AlertTriangle className="h-3 w-3 mr-1" />
+                Stale
+              </Badge>
+            )}
             <Badge 
               variant={isRunning ? "default" : isPaused ? "secondary" : "outline"}
               className={cn(
                 "text-xs",
-                isRunning && "bg-profit text-white",
-                isPaused && "bg-yellow-500 text-white"
+                isRunning && !isStale && "bg-profit text-white",
+                isPaused && !isStale && "bg-yellow-500 text-white",
+                isStale && "bg-muted text-muted-foreground"
               )}
             >
-              {isRunning && <Zap className="h-3 w-3 mr-1" />}
-              {isPaused && <Pause className="h-3 w-3 mr-1" />}
+              {isRunning && !isStale && <Zap className="h-3 w-3 mr-1" />}
+              {isPaused && !isStale && <Pause className="h-3 w-3 mr-1" />}
               {strategy.status.charAt(0).toUpperCase() + strategy.status.slice(1)}
             </Badge>
             <Badge variant="outline" className="text-xs">

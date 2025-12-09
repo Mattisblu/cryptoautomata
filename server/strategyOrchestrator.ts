@@ -49,6 +49,47 @@ class StrategyOrchestrator {
     this.startHeartbeat();
   }
 
+  /**
+   * Initialize the orchestrator on server startup.
+   * This cleans up any strategies that were marked as "running" or "paused"
+   * but are no longer active because the server was restarted.
+   */
+  async init(): Promise<void> {
+    try {
+      const staleStrategies = await storage.getRunningStrategies({ 
+        status: "running" 
+      });
+      const pausedStrategies = await storage.getRunningStrategies({ 
+        status: "paused" 
+      });
+      
+      const allStale = [...staleStrategies, ...pausedStrategies];
+      
+      if (allStale.length > 0) {
+        console.log(`[StrategyOrchestrator] Found ${allStale.length} stale strategies from previous session, cleaning up...`);
+        
+        for (const strategy of allStale) {
+          await storage.stopRunningStrategy(strategy.sessionId);
+          await storage.addTradeLog({
+            type: "algorithm",
+            message: `Strategy auto-stopped on server restart: ${strategy.algorithmName} on ${strategy.symbol}`,
+            data: { 
+              sessionId: strategy.sessionId,
+              reason: "server_restart_cleanup"
+            },
+          });
+          console.log(`[StrategyOrchestrator] Cleaned up stale strategy: ${strategy.algorithmName} (${strategy.sessionId})`);
+        }
+        
+        console.log(`[StrategyOrchestrator] Cleanup complete - ${allStale.length} strategies stopped`);
+      } else {
+        console.log("[StrategyOrchestrator] No stale strategies found, ready to start");
+      }
+    } catch (error) {
+      console.error("[StrategyOrchestrator] Error during initialization cleanup:", error);
+    }
+  }
+
   private startHeartbeat(): void {
     this.heartbeatInterval = setInterval(async () => {
       const sessionIds = Array.from(this.bots.keys());

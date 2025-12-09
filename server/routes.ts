@@ -1292,5 +1292,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Initialize strategy orchestrator - clean up any stale strategies from previous server sessions
+  await strategyOrchestrator.init();
+
   return httpServer;
 }
