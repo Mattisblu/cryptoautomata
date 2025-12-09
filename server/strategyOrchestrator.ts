@@ -425,7 +425,7 @@ class StrategyOrchestrator {
   private async evaluateRules(
     rules: TradingAlgorithm["rules"],
     ticker: { lastPrice: number; priceChangePercent: number },
-    klines: { close: number }[],
+    klines: { close: number; volume?: number }[],
     positions: any[],
     exchangeInfo: any
   ): Promise<{ action: string; rule?: any; reason: string }> {
@@ -437,13 +437,18 @@ class StrategyOrchestrator {
     const priceChange = ticker.priceChangePercent;
     const hasPosition = positions.length > 0;
 
+    // Calculate MACD indicators
+    const macd = this.calculateMACD(closes);
+    
+    // Calculate volume analysis
+    const volume = this.calculateVolumeAnalysis(klines);
+
     for (const rule of sortedRules) {
       const condition = rule.condition.toLowerCase();
       let shouldTrigger = false;
       let triggerDebugInfo = "";
 
       // --- NUMERIC PRICE CONDITIONS (highest priority) ---
-      // Parse direct price triggers like "price > 0.14", "price >= 100", etc.
       const numericResult = this.evaluateNumericCondition(rule.condition, currentPrice);
       if (numericResult.matched) {
         shouldTrigger = numericResult.triggered;
@@ -455,11 +460,78 @@ class StrategyOrchestrator {
         shouldTrigger = true;
       } else if (condition.includes("price below sma") && currentPrice < sma20) {
         shouldTrigger = true;
-      } else if (condition.includes("bullish crossover") && sma20 > sma50) {
-        shouldTrigger = true;
-      } else if (condition.includes("bearish crossover") && sma20 < sma50) {
-        shouldTrigger = true;
-      } else if (condition.includes("oversold") && priceChange < -2) {
+      } else if (condition.includes("sma crossover") || condition.includes("bullish crossover")) {
+        if (sma20 > sma50) shouldTrigger = true;
+      } else if (condition.includes("bearish crossover")) {
+        if (sma20 < sma50) shouldTrigger = true;
+      }
+
+      // --- MACD Conditions ---
+      // Buy Signal: MACD line crosses above Signal Line (bullish momentum)
+      else if (condition.includes("macd bullish crossover") || condition.includes("macd cross above")) {
+        if (macd.crossover === "bullish_crossover") shouldTrigger = true;
+      }
+      // Sell Signal: MACD line crosses below Signal Line (bearish momentum)
+      else if (condition.includes("macd bearish crossover") || condition.includes("macd cross below")) {
+        if (macd.crossover === "bearish_crossover") shouldTrigger = true;
+      }
+      // MACD trend conditions
+      else if (condition.includes("macd bullish") || condition.includes("macd positive")) {
+        if (macd.trend === "bullish") shouldTrigger = true;
+      } else if (condition.includes("macd bearish") || condition.includes("macd negative")) {
+        if (macd.trend === "bearish") shouldTrigger = true;
+      }
+      // Histogram conditions (momentum strength)
+      else if (condition.includes("macd histogram positive") || condition.includes("histogram above zero")) {
+        if (macd.histogram > 0) shouldTrigger = true;
+      } else if (condition.includes("macd histogram negative") || condition.includes("histogram below zero")) {
+        if (macd.histogram < 0) shouldTrigger = true;
+      }
+      // Zero line conditions
+      else if (condition.includes("macd above zero")) {
+        if (macd.macdLine > 0) shouldTrigger = true;
+      } else if (condition.includes("macd below zero")) {
+        if (macd.macdLine < 0) shouldTrigger = true;
+      }
+      // MACD vs Signal line
+      else if (condition.includes("macd above signal")) {
+        if (macd.macdLine > macd.signalLine) shouldTrigger = true;
+      } else if (condition.includes("macd below signal")) {
+        if (macd.macdLine < macd.signalLine) shouldTrigger = true;
+      }
+
+      // --- Volume Conditions ---
+      else if (condition.includes("volume spike") || condition.includes("high volume spike")) {
+        if (volume.isVolumeSpike) shouldTrigger = true;
+      } else if (condition.includes("high volume") || condition.includes("above average volume")) {
+        if (volume.isHighVolume) shouldTrigger = true;
+      } else if (condition.includes("low volume") || condition.includes("below average volume")) {
+        if (volume.isLowVolume) shouldTrigger = true;
+      } else if (condition.includes("volume increasing") || condition.includes("rising volume")) {
+        if (volume.volumeTrend === "increasing") shouldTrigger = true;
+      } else if (condition.includes("volume decreasing") || condition.includes("falling volume")) {
+        if (volume.volumeTrend === "decreasing") shouldTrigger = true;
+      }
+
+      // --- Combined Conditions (MACD + Volume confirmation) ---
+      else if (condition.includes("macd bullish with volume") || condition.includes("bullish with volume confirmation")) {
+        if (macd.trend === "bullish" && volume.isHighVolume) shouldTrigger = true;
+      } else if (condition.includes("macd bearish with volume") || condition.includes("bearish with volume confirmation")) {
+        if (macd.trend === "bearish" && volume.isHighVolume) shouldTrigger = true;
+      } else if (condition.includes("macd crossover with volume")) {
+        if (macd.crossover !== "none" && volume.isHighVolume) shouldTrigger = true;
+      } else if (condition.includes("bullish breakout") || condition.includes("breakout with volume")) {
+        if (macd.trend === "bullish" && volume.isVolumeSpike && currentPrice > sma20) {
+          shouldTrigger = true;
+        }
+      } else if (condition.includes("bearish breakdown")) {
+        if (macd.trend === "bearish" && volume.isVolumeSpike && currentPrice < sma20) {
+          shouldTrigger = true;
+        }
+      }
+
+      // --- Price/Market Conditions ---
+      else if (condition.includes("oversold") && priceChange < -2) {
         shouldTrigger = true;
       } else if (condition.includes("overbought") && priceChange > 2) {
         shouldTrigger = true;
@@ -470,9 +542,19 @@ class StrategyOrchestrator {
       }
 
       if (shouldTrigger) {
-        const reason = triggerDebugInfo ? 
-          `Rule triggered: ${rule.condition} - ${triggerDebugInfo}` : 
-          `Rule triggered: ${rule.condition}`;
+        // Build detailed reason with indicator values
+        let reason = `Rule triggered: ${rule.condition}`;
+        
+        if (triggerDebugInfo) {
+          reason += ` | ${triggerDebugInfo}`;
+        }
+        if (condition.includes("macd")) {
+          reason += ` | MACD: ${macd.macdLine.toFixed(4)}, Signal: ${macd.signalLine.toFixed(4)}, Histogram: ${macd.histogram.toFixed(4)}, Trend: ${macd.trend}`;
+        }
+        if (condition.includes("volume")) {
+          reason += ` | Volume: ${volume.volumeRatio.toFixed(2)}x avg, Trend: ${volume.volumeTrend}`;
+        }
+        
         console.log(`[StrategyOrchestrator] TRIGGER FIRED: action=${rule.action}, reason=${reason}`);
         return {
           action: rule.action,
@@ -489,6 +571,173 @@ class StrategyOrchestrator {
     if (data.length < period) return data[data.length - 1] || 0;
     const slice = data.slice(-period);
     return slice.reduce((a, b) => a + b, 0) / period;
+  }
+
+  // Calculate Exponential Moving Average (needed for MACD)
+  private calculateEMA(data: number[], period: number): number[] {
+    if (data.length < period) return [];
+    
+    const multiplier = 2 / (period + 1);
+    const ema: number[] = [];
+    
+    // Start with SMA for the first EMA value
+    let sum = 0;
+    for (let i = 0; i < period; i++) {
+      sum += data[i];
+    }
+    ema.push(sum / period);
+    
+    // Calculate EMA for remaining values
+    for (let i = period; i < data.length; i++) {
+      const currentEma = (data[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1];
+      ema.push(currentEma);
+    }
+    
+    return ema;
+  }
+
+  // Calculate MACD (Moving Average Convergence Divergence)
+  // MACD Line: 12-period EMA minus 26-period EMA (shows momentum)
+  // Signal Line: 9-period EMA of the MACD Line (trigger for trades)
+  // Histogram: MACD Line minus Signal Line (shows momentum strength)
+  private calculateMACD(closes: number[], fastPeriod = 12, slowPeriod = 26, signalPeriod = 9): {
+    macdLine: number;
+    signalLine: number;
+    histogram: number;
+    trend: "bullish" | "bearish" | "neutral";
+    crossover: "bullish_crossover" | "bearish_crossover" | "none";
+  } {
+    if (closes.length < slowPeriod + signalPeriod) {
+      return { macdLine: 0, signalLine: 0, histogram: 0, trend: "neutral", crossover: "none" };
+    }
+
+    // Calculate EMAs: 12-period (fast) and 26-period (slow)
+    const ema12 = this.calculateEMA(closes, fastPeriod);
+    const ema26 = this.calculateEMA(closes, slowPeriod);
+    
+    if (ema12.length === 0 || ema26.length === 0) {
+      return { macdLine: 0, signalLine: 0, histogram: 0, trend: "neutral", crossover: "none" };
+    }
+
+    // Calculate MACD line (difference between fast and slow EMA)
+    const offset = slowPeriod - fastPeriod;
+    const macdLineArray: number[] = [];
+    
+    for (let i = 0; i < ema26.length; i++) {
+      const ema12Value = ema12[i + offset];
+      const ema26Value = ema26[i];
+      if (ema12Value !== undefined && ema26Value !== undefined) {
+        macdLineArray.push(ema12Value - ema26Value);
+      }
+    }
+
+    if (macdLineArray.length < signalPeriod) {
+      return { macdLine: 0, signalLine: 0, histogram: 0, trend: "neutral", crossover: "none" };
+    }
+
+    // Calculate signal line (9-period EMA of MACD line)
+    const signalLineArray = this.calculateEMA(macdLineArray, signalPeriod);
+    
+    if (signalLineArray.length < 2) {
+      return { macdLine: 0, signalLine: 0, histogram: 0, trend: "neutral", crossover: "none" };
+    }
+
+    // Get current and previous values for crossover detection
+    const currentMacd = macdLineArray[macdLineArray.length - 1];
+    const previousMacd = macdLineArray[macdLineArray.length - 2];
+    const currentSignal = signalLineArray[signalLineArray.length - 1];
+    const previousSignal = signalLineArray[signalLineArray.length - 2];
+    const histogram = currentMacd - currentSignal;
+
+    // Determine trend based on MACD vs Signal and histogram
+    let trend: "bullish" | "bearish" | "neutral" = "neutral";
+    if (currentMacd > currentSignal && histogram > 0) {
+      trend = "bullish";
+    } else if (currentMacd < currentSignal && histogram < 0) {
+      trend = "bearish";
+    }
+
+    // Detect crossovers (buy/sell signals)
+    let crossover: "bullish_crossover" | "bearish_crossover" | "none" = "none";
+    if (previousMacd <= previousSignal && currentMacd > currentSignal) {
+      crossover = "bullish_crossover"; // MACD crossed above signal - BUY signal
+    } else if (previousMacd >= previousSignal && currentMacd < currentSignal) {
+      crossover = "bearish_crossover"; // MACD crossed below signal - SELL signal
+    }
+
+    return {
+      macdLine: currentMacd,
+      signalLine: currentSignal,
+      histogram,
+      trend,
+      crossover,
+    };
+  }
+
+  // Calculate volume analysis
+  private calculateVolumeAnalysis(klines: { close: number; volume?: number }[]): {
+    currentVolume: number;
+    averageVolume: number;
+    volumeRatio: number;
+    isVolumeSpike: boolean;
+    isHighVolume: boolean;
+    isLowVolume: boolean;
+    volumeTrend: "increasing" | "decreasing" | "stable";
+  } {
+    const volumes = klines.map(k => k.volume || 0);
+    
+    if (klines.length < 20 || volumes.every(v => v === 0)) {
+      const vol = volumes.length > 0 ? volumes[volumes.length - 1] : 0;
+      return {
+        currentVolume: vol,
+        averageVolume: vol,
+        volumeRatio: 1,
+        isVolumeSpike: false,
+        isHighVolume: false,
+        isLowVolume: false,
+        volumeTrend: "stable",
+      };
+    }
+
+    const currentVolume = volumes[volumes.length - 1];
+    
+    // Calculate 20-period average volume
+    const avgVolume20 = this.calculateSMA(volumes.slice(-20), 20);
+    
+    // Volume ratio (current vs average)
+    const volumeRatio = avgVolume20 > 0 ? currentVolume / avgVolume20 : 1;
+    
+    // Volume spike detection (volume > 2x average)
+    const isVolumeSpike = volumeRatio > 2.0;
+    
+    // High volume (> 1.5x average)
+    const isHighVolume = volumeRatio > 1.5;
+    
+    // Low volume (< 0.5x average)
+    const isLowVolume = volumeRatio < 0.5;
+    
+    // Calculate volume trend (compare recent 5 bars vs previous 5 bars)
+    let volumeTrend: "increasing" | "decreasing" | "stable" = "stable";
+    if (volumes.length >= 10) {
+      const recent5Avg = this.calculateSMA(volumes.slice(-5), 5);
+      const previous5Avg = this.calculateSMA(volumes.slice(-10, -5), 5);
+      
+      if (recent5Avg > previous5Avg * 1.2) {
+        volumeTrend = "increasing";
+      } else if (recent5Avg < previous5Avg * 0.8) {
+        volumeTrend = "decreasing";
+      }
+    }
+
+    return {
+      currentVolume,
+      averageVolume: avgVolume20,
+      volumeRatio,
+      isVolumeSpike,
+      isHighVolume,
+      isLowVolume,
+      volumeTrend,
+    };
   }
 
   private async executeDecision(
