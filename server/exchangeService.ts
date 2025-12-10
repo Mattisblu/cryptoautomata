@@ -2,7 +2,19 @@ import type { Exchange, Market, Ticker, Kline, Position, Order, ApiCredentials }
 import { randomUUID } from "crypto";
 import { getCoinstoreContracts, getCoinstoreTicker, getCoinstoreKlines, validateCoinstoreCredentials } from "./coinstoreApi";
 import { getBydfiMarkets, getBydfiTicker, getBydfiKlines, validateBydfiCredentials } from "./bydfiApi";
-import { getBitunixMarkets, getBitunixTicker, getBitunixKlines, validateBitunixCredentials } from "./bitunixApi";
+import { 
+  getBitunixMarkets, 
+  getBitunixTicker, 
+  getBitunixKlines, 
+  validateBitunixCredentials,
+  placeBitunixOrder,
+  setBitunixLeverage,
+  getBitunixPositions,
+  cancelBitunixOrder,
+  closeBitunixPosition,
+  type PlaceOrderParams,
+  type BitunixPosition,
+} from "./bitunixApi";
 import { getToobitMarkets, getToobitTicker, getToobitKlines, validateToobitCredentials } from "./toobitApi";
 
 // Flag to enable/disable live API (can be controlled via environment)
@@ -267,6 +279,25 @@ export interface MarketsResult {
   dataError?: string;
 }
 
+// Order params for real trading
+export interface RealOrderParams {
+  symbol: string;
+  side: "buy" | "sell";
+  type: "market" | "limit";
+  quantity: number;
+  price?: number;
+  leverage?: number;
+}
+
+// Result for real order placement
+export interface RealOrderResult {
+  success: boolean;
+  order?: Order;
+  position?: Position;
+  error?: string;
+  exchangeOrderId?: string;
+}
+
 interface ExchangeService {
   validateCredentials(credentials: ApiCredentials): Promise<boolean>;
   getMarkets(exchange: Exchange): Promise<MarketsResult>;
@@ -275,9 +306,12 @@ interface ExchangeService {
   getPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]>;
   getOrders(exchange: Exchange, credentials: ApiCredentials): Promise<Order[]>;
   placeOrder(exchange: Exchange, credentials: ApiCredentials, order: Partial<Order>): Promise<Order>;
+  placeRealOrder(exchange: Exchange, credentials: ApiCredentials, params: RealOrderParams): Promise<RealOrderResult>;
   cancelOrder(exchange: Exchange, credentials: ApiCredentials, orderId: string): Promise<boolean>;
   closePosition(exchange: Exchange, credentials: ApiCredentials, positionId: string): Promise<boolean>;
+  closeRealPosition(exchange: Exchange, credentials: ApiCredentials, position: Position): Promise<boolean>;
   closeAllPositions(exchange: Exchange, credentials: ApiCredentials): Promise<boolean>;
+  fetchRealPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]>;
   getExchangeInfo(exchange: Exchange): typeof EXCHANGE_CONFIG[Exchange];
 }
 
@@ -752,6 +786,227 @@ export const exchangeService: ExchangeService = {
     }
     
     return true;
+  },
+
+  // ============ REAL TRADING METHODS ============
+  
+  // Place a real order on the exchange
+  async placeRealOrder(exchange: Exchange, credentials: ApiCredentials, params: RealOrderParams): Promise<RealOrderResult> {
+    console.log(`[REAL TRADING] Placing order on ${exchange}: ${params.side} ${params.quantity} ${params.symbol}`);
+    
+    if (exchange === "bitunix") {
+      try {
+        // First, set leverage if specified
+        if (params.leverage) {
+          const leverageResult = await setBitunixLeverage(
+            credentials,
+            params.symbol,
+            params.leverage,
+            "ISOLATION"
+          );
+          if (!leverageResult.success) {
+            console.warn(`[REAL TRADING] Failed to set leverage: ${leverageResult.error}`);
+            // Continue anyway - leverage may already be set
+          }
+        }
+
+        // Place the order
+        const orderParams: PlaceOrderParams = {
+          symbol: params.symbol,
+          side: params.side.toUpperCase() as "BUY" | "SELL",
+          orderType: params.type.toUpperCase() as "MARKET" | "LIMIT",
+          qty: params.quantity.toString(),
+          tradeSide: "OPEN",
+        };
+
+        if (params.type === "limit" && params.price) {
+          orderParams.price = params.price.toString();
+        }
+
+        const result = await placeBitunixOrder(credentials, orderParams);
+
+        if (!result.success || !result.data) {
+          console.error(`[REAL TRADING] Order failed: ${result.error}`);
+          return {
+            success: false,
+            error: result.error || "Order placement failed",
+          };
+        }
+
+        console.log(`[REAL TRADING] Order placed successfully: ${result.data.orderId}`);
+
+        // Get current ticker for order price
+        const tickerResult = await this.getTicker(exchange, params.symbol);
+        const fillPrice = parseFloat(result.data.avgPrice || result.data.price) || tickerResult.ticker.lastPrice;
+
+        // Create local order record
+        const order: Order = {
+          id: result.data.orderId,
+          symbol: params.symbol,
+          type: params.type,
+          side: params.side,
+          price: fillPrice,
+          quantity: params.quantity,
+          filledQuantity: parseFloat(result.data.filledQty || result.data.qty) || params.quantity,
+          status: result.data.status?.toLowerCase() === "filled" ? "filled" : "pending",
+          timestamp: Date.now(),
+        };
+
+        // Create position for filled market orders
+        let position: Position | undefined;
+        if (order.status === "filled" || params.type === "market") {
+          const leverage = params.leverage || 10;
+          position = {
+            id: randomUUID(), // We'll update this when we fetch real positions
+            symbol: params.symbol,
+            side: params.side === "buy" ? "long" : "short",
+            entryPrice: fillPrice,
+            markPrice: fillPrice,
+            quantity: params.quantity,
+            leverage,
+            marginType: "isolated",
+            unrealizedPnl: 0,
+            unrealizedPnlPercent: 0,
+            liquidationPrice: params.side === "buy" 
+              ? fillPrice * (1 - 1/leverage * 0.9)
+              : fillPrice * (1 + 1/leverage * 0.9),
+            timestamp: Date.now(),
+          };
+        }
+
+        return {
+          success: true,
+          order,
+          position,
+          exchangeOrderId: result.data.orderId,
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[REAL TRADING] Exception: ${errorMsg}`);
+        return {
+          success: false,
+          error: errorMsg,
+        };
+      }
+    }
+
+    // For unsupported exchanges, return error
+    return {
+      success: false,
+      error: `Real trading not implemented for ${exchange}`,
+    };
+  },
+
+  // Close a real position on the exchange
+  async closeRealPosition(exchange: Exchange, credentials: ApiCredentials, position: Position): Promise<boolean> {
+    console.log(`[REAL TRADING] Closing position on ${exchange}: ${position.symbol} ${position.side}`);
+    
+    if (exchange === "bitunix") {
+      try {
+        // First try to fetch real positions to get the positionId
+        const positionsResult = await getBitunixPositions(credentials);
+        
+        if (positionsResult.success && positionsResult.data) {
+          // Find matching position
+          const realPosition = positionsResult.data.find(
+            (p: BitunixPosition) => p.symbol === position.symbol
+          );
+          
+          if (realPosition) {
+            const result = await closeBitunixPosition(
+              credentials,
+              realPosition.positionId,
+              position.symbol,
+              realPosition.side,
+              realPosition.qty
+            );
+            
+            if (result.success) {
+              console.log(`[REAL TRADING] Position closed successfully`);
+              return true;
+            } else {
+              console.error(`[REAL TRADING] Failed to close position: ${result.error}`);
+              return false;
+            }
+          }
+        }
+        
+        // If we can't find real position, try placing opposite order
+        const closeSide = position.side === "long" ? "SELL" : "BUY";
+        const result = await placeBitunixOrder(credentials, {
+          symbol: position.symbol,
+          side: closeSide as "BUY" | "SELL",
+          orderType: "MARKET",
+          qty: position.quantity.toString(),
+          tradeSide: "CLOSE",
+          reduceOnly: true,
+        });
+        
+        if (result.success) {
+          console.log(`[REAL TRADING] Position closed with reduce-only order`);
+          return true;
+        }
+        
+        console.error(`[REAL TRADING] Failed to close position: ${result.error}`);
+        return false;
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[REAL TRADING] Exception closing position: ${errorMsg}`);
+        return false;
+      }
+    }
+    
+    return false;
+  },
+
+  // Fetch real positions from the exchange
+  async fetchRealPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]> {
+    console.log(`[REAL TRADING] Fetching positions from ${exchange}`);
+    
+    if (exchange === "bitunix") {
+      try {
+        const result = await getBitunixPositions(credentials);
+        
+        if (!result.success || !result.data) {
+          console.error(`[REAL TRADING] Failed to fetch positions: ${result.error}`);
+          return [];
+        }
+        
+        const positions: Position[] = result.data.map((p: BitunixPosition) => ({
+          id: p.positionId,
+          symbol: p.symbol,
+          side: p.side.toLowerCase() === "long" || p.side.toLowerCase() === "buy" ? "long" : "short",
+          entryPrice: parseFloat(p.entryPrice),
+          markPrice: parseFloat(p.markPrice),
+          quantity: parseFloat(p.qty),
+          leverage: parseInt(p.leverage) || 10,
+          marginType: p.marginMode?.toLowerCase() === "cross" ? "cross" : "isolated",
+          unrealizedPnl: parseFloat(p.unrealizedPnl),
+          unrealizedPnlPercent: 0, // Calculate based on entry/mark
+          liquidationPrice: parseFloat(p.liquidationPrice),
+          timestamp: Date.now(),
+        }));
+        
+        // Calculate unrealized PnL percent
+        for (const pos of positions) {
+          if (pos.entryPrice > 0) {
+            const priceDiff = pos.side === "long" 
+              ? pos.markPrice - pos.entryPrice 
+              : pos.entryPrice - pos.markPrice;
+            pos.unrealizedPnlPercent = (priceDiff / pos.entryPrice) * 100 * pos.leverage;
+          }
+        }
+        
+        console.log(`[REAL TRADING] Fetched ${positions.length} positions`);
+        return positions;
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[REAL TRADING] Exception fetching positions: ${errorMsg}`);
+        return [];
+      }
+    }
+    
+    return [];
   },
   
   getExchangeInfo(exchange: Exchange) {

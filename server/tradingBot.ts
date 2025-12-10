@@ -1005,19 +1005,48 @@ class TradingBot {
         );
         const quantity = positionSize / ticker.lastPrice;
 
-        // Execute order (simulated in paper mode, would be real in real mode)
-        const order = await exchangeService.placeOrder(exchange, credentials, {
-          symbol,
-          type: decision.rule?.priceType || "market",
-          side: decision.action as "buy" | "sell",
-          quantity,
-          price: ticker.lastPrice,
-        });
+        let order: Order;
+        let realOrderId: string | undefined;
+
+        if (executionMode === "real") {
+          // REAL TRADING: Place order on exchange
+          console.log(`[REAL TRADING] Executing ${decision.action} order on ${exchange}`);
+          const realResult = await exchangeService.placeRealOrder(exchange, credentials, {
+            symbol,
+            side: decision.action as "buy" | "sell",
+            type: (decision.rule?.priceType || "market") as "market" | "limit",
+            quantity,
+            price: ticker.lastPrice,
+            leverage: effectiveLeverage,
+          });
+
+          if (!realResult.success) {
+            await storage.addTradeLog({
+              type: "error",
+              message: `[REAL] Order failed: ${realResult.error}`,
+              data: { exchange, symbol, side: decision.action },
+            });
+            return;
+          }
+
+          order = realResult.order!;
+          realOrderId = realResult.exchangeOrderId;
+          console.log(`[REAL TRADING] Order executed: ${realOrderId}`);
+        } else {
+          // PAPER TRADING: Simulated order
+          order = await exchangeService.placeOrder(exchange, credentials, {
+            symbol,
+            type: decision.rule?.priceType || "market",
+            side: decision.action as "buy" | "sell",
+            quantity,
+            price: ticker.lastPrice,
+          });
+        }
 
         await storage.addOrder(exchange, order);
 
         // If order filled, create position
-        if (order.status === "filled") {
+        if (order.status === "filled" || executionMode === "real") {
           this.state.successfulTrades++;
           
           const position: Position = {
@@ -1097,7 +1126,21 @@ class TradingBot {
         const symbolPositions = positions.filter((p) => p.symbol === symbol);
 
         for (const position of symbolPositions) {
-          await exchangeService.closePosition(exchange, credentials, position.id);
+          if (executionMode === "real") {
+            // REAL TRADING: Close position on exchange
+            console.log(`[REAL TRADING] Closing position on ${exchange}: ${position.symbol}`);
+            const closed = await exchangeService.closeRealPosition(exchange, credentials, position);
+            if (!closed) {
+              await storage.addTradeLog({
+                type: "error",
+                message: `[REAL] Failed to close position on exchange: ${position.symbol}`,
+                data: { exchange, symbol: position.symbol, positionId: position.id },
+              });
+            }
+          } else {
+            await exchangeService.closePosition(exchange, credentials, position.id);
+          }
+          
           await storage.deletePosition(exchange, position.id);
           // Clean up any associated stop orders
           await storage.deleteStopOrdersByPosition(exchange, position.id);

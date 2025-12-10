@@ -329,6 +329,289 @@ export interface ExchangeBalance {
   marginBalance: number;
 }
 
+// Order types for Bitunix
+export interface PlaceOrderParams {
+  symbol: string;
+  side: "BUY" | "SELL";
+  orderType: "LIMIT" | "MARKET";
+  qty: string;
+  price?: string;
+  tradeSide?: "OPEN" | "CLOSE";
+  positionId?: string;
+  reduceOnly?: boolean;
+  effect?: "GTC" | "IOC" | "FOK";
+  clientId?: string;
+  leverage?: number;
+}
+
+export interface BitunixOrderResponse {
+  orderId: string;
+  clientId?: string;
+  symbol: string;
+  side: string;
+  price: string;
+  qty: string;
+  orderType: string;
+  status: string;
+  filledQty?: string;
+  avgPrice?: string;
+  createTime?: number;
+}
+
+export interface BitunixPosition {
+  positionId: string;
+  symbol: string;
+  side: string;
+  qty: string;
+  entryPrice: string;
+  markPrice: string;
+  unrealizedPnl: string;
+  leverage: string;
+  marginMode: string;
+  liquidationPrice: string;
+  margin: string;
+}
+
+// Place a single order on Bitunix
+export async function placeBitunixOrder(
+  credentials: ApiCredentials,
+  params: PlaceOrderParams
+): Promise<ApiResult<BitunixOrderResponse>> {
+  try {
+    const body: Record<string, any> = {
+      symbol: params.symbol,
+      side: params.side,
+      qty: params.qty,
+      orderType: params.orderType,
+      tradeSide: params.tradeSide || "OPEN",
+      effect: params.effect || "GTC",
+    };
+
+    // Add price for limit orders
+    if (params.orderType === "LIMIT" && params.price) {
+      body.price = params.price;
+    }
+
+    // For closing positions
+    if (params.positionId) {
+      body.positionId = params.positionId;
+    }
+
+    if (params.reduceOnly !== undefined) {
+      body.reduceOnly = params.reduceOnly;
+    }
+
+    if (params.clientId) {
+      body.clientId = params.clientId;
+    }
+
+    const bodyStr = JSON.stringify(body);
+    const headers = createBitunixHeaders(credentials, "", bodyStr);
+    const url = `${BITUNIX_FUTURES_URL}/api/v1/futures/trade/place_order`;
+
+    console.log("[BITUNIX] Placing order:", url);
+    console.log("[BITUNIX] Order body:", bodyStr);
+
+    const response = await fetchWithTimeout(url, {
+      method: "POST",
+      headers,
+      body: bodyStr,
+    });
+
+    const data = await response.json();
+    console.log("[BITUNIX] Order response:", JSON.stringify(data));
+
+    if (!response.ok || data.code !== 0) {
+      return {
+        success: false,
+        data: null,
+        error: data.msg || `Order failed with code ${data.code}`,
+        errorCode: `BITUNIX_${data.code}`,
+      };
+    }
+
+    return {
+      success: true,
+      data: data.data as BitunixOrderResponse,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[BITUNIX] Failed to place order:", errorMessage);
+    return {
+      success: false,
+      data: null,
+      error: `Failed to place order: ${errorMessage}`,
+      errorCode: "NETWORK_ERROR",
+    };
+  }
+}
+
+// Set leverage for a symbol
+export async function setBitunixLeverage(
+  credentials: ApiCredentials,
+  symbol: string,
+  leverage: number,
+  marginMode: "ISOLATION" | "CROSS" = "ISOLATION"
+): Promise<ApiResult<boolean>> {
+  try {
+    const body = {
+      symbol,
+      leverage: leverage.toString(),
+      marginMode,
+    };
+    const bodyStr = JSON.stringify(body);
+    const headers = createBitunixHeaders(credentials, "", bodyStr);
+    const url = `${BITUNIX_FUTURES_URL}/api/v1/futures/account/set_leverage`;
+
+    console.log("[BITUNIX] Setting leverage:", symbol, leverage, marginMode);
+
+    const response = await fetchWithTimeout(url, {
+      method: "POST",
+      headers,
+      body: bodyStr,
+    });
+
+    const data = await response.json();
+    console.log("[BITUNIX] Set leverage response:", JSON.stringify(data));
+
+    if (!response.ok || data.code !== 0) {
+      // Code 40023 typically means leverage is already set - treat as success
+      if (data.code === 40023) {
+        return { success: true, data: true };
+      }
+      return {
+        success: false,
+        data: false,
+        error: data.msg || `Failed to set leverage`,
+        errorCode: `BITUNIX_${data.code}`,
+      };
+    }
+
+    return { success: true, data: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[BITUNIX] Failed to set leverage:", errorMessage);
+    return {
+      success: false,
+      data: false,
+      error: `Failed to set leverage: ${errorMessage}`,
+      errorCode: "NETWORK_ERROR",
+    };
+  }
+}
+
+// Get current positions from Bitunix
+export async function getBitunixPositions(
+  credentials: ApiCredentials
+): Promise<ApiResult<BitunixPosition[]>> {
+  try {
+    const headers = createBitunixHeaders(credentials);
+    const url = `${BITUNIX_FUTURES_URL}/api/v1/futures/position/get_pending_positions`;
+
+    console.log("[BITUNIX] Fetching positions");
+
+    const response = await fetchWithTimeout(url, {
+      method: "GET",
+      headers,
+    });
+
+    const data = await response.json();
+    console.log("[BITUNIX] Positions response:", JSON.stringify(data));
+
+    if (!response.ok || data.code !== 0) {
+      return {
+        success: false,
+        data: null,
+        error: data.msg || "Failed to fetch positions",
+        errorCode: `BITUNIX_${data.code}`,
+      };
+    }
+
+    return {
+      success: true,
+      data: (data.data || []) as BitunixPosition[],
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[BITUNIX] Failed to fetch positions:", errorMessage);
+    return {
+      success: false,
+      data: null,
+      error: `Failed to fetch positions: ${errorMessage}`,
+      errorCode: "NETWORK_ERROR",
+    };
+  }
+}
+
+// Cancel an order on Bitunix
+export async function cancelBitunixOrder(
+  credentials: ApiCredentials,
+  symbol: string,
+  orderId: string
+): Promise<ApiResult<boolean>> {
+  try {
+    const body = { symbol, orderId };
+    const bodyStr = JSON.stringify(body);
+    const headers = createBitunixHeaders(credentials, "", bodyStr);
+    const url = `${BITUNIX_FUTURES_URL}/api/v1/futures/trade/cancel_order`;
+
+    console.log("[BITUNIX] Canceling order:", orderId);
+
+    const response = await fetchWithTimeout(url, {
+      method: "POST",
+      headers,
+      body: bodyStr,
+    });
+
+    const data = await response.json();
+    console.log("[BITUNIX] Cancel order response:", JSON.stringify(data));
+
+    if (!response.ok || data.code !== 0) {
+      return {
+        success: false,
+        data: false,
+        error: data.msg || "Failed to cancel order",
+        errorCode: `BITUNIX_${data.code}`,
+      };
+    }
+
+    return { success: true, data: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[BITUNIX] Failed to cancel order:", errorMessage);
+    return {
+      success: false,
+      data: false,
+      error: `Failed to cancel order: ${errorMessage}`,
+      errorCode: "NETWORK_ERROR",
+    };
+  }
+}
+
+// Close a position on Bitunix (market order)
+export async function closeBitunixPosition(
+  credentials: ApiCredentials,
+  positionId: string,
+  symbol: string,
+  side: string,
+  qty: string
+): Promise<ApiResult<BitunixOrderResponse>> {
+  // To close a position, we need to place an opposite order
+  // If position is LONG (BUY side), we SELL to close
+  // If position is SHORT (SELL side), we BUY to close
+  const closeSide = side.toUpperCase() === "LONG" || side.toUpperCase() === "BUY" ? "SELL" : "BUY";
+  
+  return placeBitunixOrder(credentials, {
+    symbol,
+    side: closeSide as "BUY" | "SELL",
+    orderType: "MARKET",
+    qty,
+    tradeSide: "CLOSE",
+    positionId,
+    reduceOnly: true,
+  });
+}
+
 export async function getBitunixBalance(credentials: ApiCredentials): Promise<ApiResult<ExchangeBalance[]>> {
   try {
     const marginCoin = "USDT";
