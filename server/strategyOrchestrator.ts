@@ -447,6 +447,9 @@ class StrategyOrchestrator {
       const condition = rule.condition.toLowerCase();
       let shouldTrigger = false;
       let triggerDebugInfo = "";
+      
+      // Debug: Log each rule being evaluated
+      console.log(`[StrategyOrchestrator] Evaluating rule: "${rule.condition}" (action: ${rule.action}, priority: ${rule.priority})`);
 
       // --- NUMERIC PRICE CONDITIONS (highest priority) ---
       const numericResult = this.evaluateNumericCondition(rule.condition, currentPrice);
