@@ -442,6 +442,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update algorithm rules
+  app.patch("/api/algorithms/:id", async (req, res) => {
+    try {
+      const algorithm = await storage.getAlgorithm(req.params.id);
+      if (!algorithm) {
+        return res.status(404).json({ success: false, error: "Algorithm not found" });
+      }
+
+      const { rules, riskManagement, name } = req.body;
+      
+      // Validate rules if provided
+      let warnings: any[] = [];
+      if (rules && Array.isArray(rules)) {
+        warnings = tradingBot.validateRules(rules);
+      }
+
+      // Update the algorithm
+      const updatedAlgorithm = await storage.updateAlgorithm({
+        ...algorithm,
+        ...(name && { name }),
+        ...(rules && { rules }),
+        ...(riskManagement && { riskManagement }),
+      });
+
+      res.json({ 
+        success: true, 
+        algorithm: updatedAlgorithm,
+        warnings,
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Validate algorithm rules (dry-run)
+  app.post("/api/algorithms/validate-rules", async (req, res) => {
+    try {
+      const { rules } = req.body;
+      
+      if (!rules || !Array.isArray(rules)) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Rules must be an array" 
+        });
+      }
+
+      const warnings = tradingBot.validateRules(rules);
+      
+      res.json({ 
+        success: true, 
+        valid: warnings.length === 0,
+        warnings,
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   // ============ ALGORITHM VERSIONS ROUTES ============
 
   // Get all versions of an algorithm

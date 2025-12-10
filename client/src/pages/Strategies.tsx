@@ -62,6 +62,7 @@ import {
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useTradingContext } from "@/lib/tradingContext";
+import { RuleEditor } from "@/components/RuleEditor";
 import type { TradingAlgorithm, AlgorithmVersion, AbTest, RunningStrategy } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
@@ -81,10 +82,12 @@ function AlgorithmCard({
   algorithm, 
   onDelete,
   onSaveVersion,
+  onEditRules,
 }: { 
   algorithm: TradingAlgorithm; 
   onDelete: () => void;
   onSaveVersion: () => void;
+  onEditRules: () => void;
 }) {
   const [isVersionsOpen, setIsVersionsOpen] = useState(false);
   const { setActiveAlgorithm, activeAlgorithm } = useTradingContext();
@@ -224,13 +227,23 @@ function AlgorithmCard({
                 setActiveAlgorithm(algorithm);
                 toast({ title: "Algorithm Loaded", description: `${algorithm.name} is now active.` });
               }}
+              data-testid={`button-load-algorithm-${algorithm.id}`}
             >
               Load
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={onSaveVersion} className="flex-1">
+          <Button 
+            size="sm" 
+            variant="outline" 
+            onClick={onEditRules}
+            data-testid={`button-edit-rules-${algorithm.id}`}
+          >
+            <Code className="h-3.5 w-3.5 mr-1" />
+            Edit Rules
+          </Button>
+          <Button size="sm" variant="outline" onClick={onSaveVersion}>
             <Copy className="h-3.5 w-3.5 mr-1" />
-            Save Version
+            Save
           </Button>
           <Button size="sm" variant="ghost" onClick={onDelete}>
             <Trash2 className="h-3.5 w-3.5 text-loss" />
@@ -519,6 +532,7 @@ export default function Strategies() {
   const { selectedExchange, selectedMarket } = useTradingContext();
   const [isCreateTestOpen, setIsCreateTestOpen] = useState(false);
   const [saveVersionAlgoId, setSaveVersionAlgoId] = useState<string | null>(null);
+  const [editingAlgorithm, setEditingAlgorithm] = useState<TradingAlgorithm | null>(null);
   const [changeNotes, setChangeNotes] = useState("");
   const [newTest, setNewTest] = useState({
     name: "",
@@ -787,6 +801,7 @@ export default function Strategies() {
                   algorithm={algorithm}
                   onDelete={() => deleteAlgorithmMutation.mutate(algorithm.id)}
                   onSaveVersion={() => setSaveVersionAlgoId(algorithm.id)}
+                  onEditRules={() => setEditingAlgorithm(algorithm)}
                 />
               ))}
             </div>
@@ -946,6 +961,16 @@ export default function Strategies() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <RuleEditor
+        algorithm={editingAlgorithm}
+        open={!!editingAlgorithm}
+        onOpenChange={(open) => !open && setEditingAlgorithm(null)}
+        onSave={(updatedAlgorithm) => {
+          queryClient.invalidateQueries({ queryKey: ["/api/algorithms"] });
+          setEditingAlgorithm(null);
+        }}
+      />
     </div>
   );
 }
