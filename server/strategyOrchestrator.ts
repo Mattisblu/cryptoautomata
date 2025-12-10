@@ -554,6 +554,19 @@ class StrategyOrchestrator {
       } else if (condition.includes("has position") && hasPosition) {
         shouldTrigger = true;
       }
+      // --- Immediate Entry Conditions (always trigger if no position) ---
+      else if (
+        (condition.includes("immediate") || 
+         condition.includes("enter now") || 
+         condition.includes("market entry") ||
+         condition.includes("on start") ||
+         condition.includes("always enter") ||
+         condition.includes("entry signal")) && 
+        !hasPosition
+      ) {
+        shouldTrigger = true;
+        console.log(`[StrategyOrchestrator] Immediate entry condition matched: "${rule.condition}"`);
+      }
 
       if (shouldTrigger) {
         // Build detailed reason with indicator values
