@@ -72,9 +72,10 @@ export function RuleEditor({ algorithm, open, onOpenChange, onSave }: RuleEditor
   }, [algorithm, open]);
 
   const validateRules = async (rulesToValidate: TradingRule[]) => {
+    if (!algorithm) return [];
     setIsValidating(true);
     try {
-      const response = await apiRequest("POST", "/api/algorithms/validate-rules", { rules: rulesToValidate });
+      const response = await apiRequest("POST", `/api/algorithms/${algorithm.id}/validate-rules`, { rules: rulesToValidate });
       const data = await response.json();
       setWarnings(data.warnings || []);
       return data.warnings || [];
@@ -148,7 +149,7 @@ export function RuleEditor({ algorithm, open, onOpenChange, onSave }: RuleEditor
         }
       }
 
-      const response = await apiRequest("PATCH", `/api/algorithms/${algorithm.id}`, { rules });
+      const response = await apiRequest("PATCH", `/api/algorithms/${algorithm.id}/rules`, { rules });
       const data = await response.json();
       
       if (data.success) {
