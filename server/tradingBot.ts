@@ -30,8 +30,46 @@ interface TradingBotState {
   successfulTrades: number;
 }
 
+// Known rule patterns that the bot can understand
+const RECOGNIZED_RULE_PATTERNS = [
+  // SMA conditions
+  "price above sma", "price below sma", "sma crossover", "bullish crossover", "bearish crossover",
+  // MACD conditions
+  "macd bullish crossover", "macd cross above", "macd bearish crossover", "macd cross below",
+  "macd bullish", "macd positive", "macd bearish", "macd negative",
+  "macd histogram positive", "histogram above zero", "macd histogram negative", "histogram below zero",
+  "macd above signal", "macd below signal",
+  // Volume conditions
+  "volume spike", "high volume spike", "high volume", "above average volume",
+  "low volume", "below average volume", "volume increasing", "rising volume",
+  "volume decreasing", "falling volume",
+  // Combined conditions
+  "macd bullish with volume", "bullish with volume confirmation",
+  "macd bearish with volume", "bearish with volume confirmation",
+  "macd crossover with volume", "bullish breakout", "breakout with volume", "bearish breakdown",
+  // Price/market conditions
+  "oversold", "overbought", "no position", "has position",
+  // Immediate entry
+  "immediate", "enter now", "market entry", "on start", "always enter", "entry signal",
+  // Take profit / stop loss (need % number)
+  "take profit", "take-profit", "stop loss", "stop-loss", "price decreases", "price increases",
+  // Price breakout
+  "price breaks", "breaks below", "breaks above",
+  // Numeric conditions (price > X, price < X, etc.)
+  "price >", "price <", "price >=", "price <=", "price =",
+];
+
+export interface RuleWarning {
+  ruleIndex: number;
+  condition: string;
+  action: string;
+  warning: string;
+  isUnrecognized: boolean;
+}
+
 class TradingBot {
   private config: TradingBotConfig | null = null;
+  private reportedWarnings: Set<string> = new Set(); // Track already reported warnings
   private state: TradingBotState = {
     isRunning: false,
     isPaused: false,
@@ -43,12 +81,54 @@ class TradingBot {
   };
   private checkInterval: NodeJS.Timeout | null = null;
 
+  // Validate algorithm rules and return any warnings
+  validateRules(rules: TradingRule[]): RuleWarning[] {
+    const warnings: RuleWarning[] = [];
+    
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i];
+      const condition = rule.condition.toLowerCase();
+      
+      // Check if rule matches any recognized pattern
+      const isRecognized = RECOGNIZED_RULE_PATTERNS.some(pattern => 
+        condition.includes(pattern.toLowerCase())
+      );
+      
+      // Also check for numeric price conditions (price > 100, etc.)
+      const hasNumericCondition = /price\s*[><=]+\s*[\d.]+/.test(condition);
+      
+      if (!isRecognized && !hasNumericCondition) {
+        warnings.push({
+          ruleIndex: i,
+          condition: rule.condition,
+          action: rule.action,
+          warning: `Unrecognized condition: "${rule.condition}". The bot may not be able to evaluate this rule.`,
+          isUnrecognized: true,
+        });
+      }
+      
+      // Check for missing action
+      if (!rule.action || !["buy", "sell", "close", "hold"].includes(rule.action.toLowerCase())) {
+        warnings.push({
+          ruleIndex: i,
+          condition: rule.condition,
+          action: rule.action,
+          warning: `Invalid action "${rule.action}". Expected: buy, sell, close, or hold.`,
+          isUnrecognized: false,
+        });
+      }
+    }
+    
+    return warnings;
+  }
+
   async start(config: TradingBotConfig): Promise<void> {
     if (this.state.isRunning) {
       throw new Error("Trading bot is already running");
     }
 
     this.config = config;
+    this.reportedWarnings = new Set(); // Reset warnings on new start
     this.state = {
       isRunning: true,
       isPaused: false,
@@ -58,6 +138,35 @@ class TradingBot {
       totalTrades: 0,
       successfulTrades: 0,
     };
+
+    // Validate algorithm rules before starting
+    const ruleWarnings = this.validateRules(config.algorithm.rules);
+    if (ruleWarnings.length > 0) {
+      console.warn(`[TradingBot] Algorithm has ${ruleWarnings.length} rule warning(s):`);
+      for (const warning of ruleWarnings) {
+        console.warn(`  - Rule ${warning.ruleIndex + 1}: ${warning.warning}`);
+        
+        // Log to trade log and send notification
+        await storage.addTradeLog({
+          type: "warning",
+          message: `Rule Warning: ${warning.warning}`,
+          data: { 
+            ruleIndex: warning.ruleIndex,
+            condition: warning.condition,
+            action: warning.action,
+            algorithmId: config.algorithm.id,
+          },
+        });
+        
+        // Send notification for unrecognized rules
+        if (warning.isUnrecognized) {
+          await notificationService.notifyError(
+            `Unrecognized rule in algorithm "${config.algorithm.name}": "${warning.condition}"`,
+            { algorithmId: config.algorithm.id, ruleIndex: warning.ruleIndex }
+          );
+        }
+      }
+    }
 
     // Get exchange-specific configuration
     const exchangeInfo = exchangeService.getExchangeInfo(config.exchange);
