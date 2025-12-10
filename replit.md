@@ -8,6 +8,12 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: December 2024
 
 ## Recent Changes
+- **Real Order Execution for Bitunix**: When in Real Trading mode, orders are now sent to Bitunix exchange
+  - `bitunixApi.ts` extended with order placement, position fetching, leverage setting, order cancellation
+  - `exchangeService.ts` has new methods: `placeRealOrder`, `closeRealPosition`, `fetchRealPositions`
+  - `tradingBot.ts` routes to real API when `executionMode === "real"`
+  - Authentication uses Bitunix double SHA256 signing (nonce+timestamp+apiKey+params -> SHA256 -> +secretKey -> SHA256)
+  - API credentials retrieved securely from storage (never hardcoded)
 - **Per-Request Data Source Tracking**: Eliminated race conditions with proper per-request tracking
   - Service functions return result types: `TickerResult`, `KlinesResult`, `MarketsResult`
   - Each result includes `{ data, dataSource, dataError }` embedded directly
