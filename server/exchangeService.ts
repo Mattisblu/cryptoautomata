@@ -1021,6 +1021,13 @@ export interface TickerStreamData {
   dataError?: string;
 }
 
+// Klines stream callback with data source info
+export interface KlinesStreamData {
+  klines: Kline[];
+  dataSource: DataSource;
+  dataError?: string;
+}
+
 // Function to continuously update ticker data (for WebSocket simulation)
 // NOTE: Default interval increased from 1000ms to 2000ms to reduce API rate limiting issues
 export function createTickerStream(
@@ -1045,6 +1052,36 @@ export function createTickerStream(
 
   fetchTicker();
   const interval = setInterval(fetchTicker, intervalMs);
+
+  return {
+    stop: () => clearInterval(interval),
+  };
+}
+
+// Function to continuously update klines data (for chart and indicator updates)
+// Klines update less frequently than tickers since candle data changes slowly
+export function createKlinesStream(
+  exchange: Exchange,
+  symbol: string,
+  timeframe: string,
+  callback: (data: KlinesStreamData) => void,
+  intervalMs: number = 10000 // 10 seconds - klines change slower than tickers
+): { stop: () => void } {
+  const fetchKlines = async () => {
+    try {
+      const result = await exchangeService.getKlines(exchange, symbol, timeframe, 100);
+      callback({ 
+        klines: result.klines, 
+        dataSource: result.dataSource,
+        ...(result.dataError ? { dataError: result.dataError } : {})
+      });
+    } catch (error) {
+      console.error("Klines stream error:", error);
+    }
+  };
+
+  fetchKlines();
+  const interval = setInterval(fetchKlines, intervalMs);
 
   return {
     stop: () => clearInterval(interval),

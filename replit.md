@@ -8,6 +8,16 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: December 2024
 
 ## Recent Changes
+- **Continuous Klines Streaming**: Fixed issue where chart data wasn't updating
+  - Created `createKlinesStream()` function to stream klines every 10 seconds
+  - WebSocket now starts both ticker stream (2s) AND klines stream (10s) on subscription
+  - MACD and other indicators now update as new candle data arrives
+  - Chart data refreshes continuously instead of only on initial load
+- **Rule Editor GUI**: Added visual editor for trading algorithm rules
+  - Form-based editing for entry/exit rules and risk management
+  - JSON mode for advanced editing
+  - Real-time rule validation with warning indicators
+  - API endpoints: `PATCH /api/algorithms/:id/rules`, `POST /api/algorithms/:id/validate-rules`
 - **Real Order Execution for Bitunix**: When in Real Trading mode, orders are now sent to Bitunix exchange
   - `bitunixApi.ts` extended with order placement, position fetching, leverage setting, order cancellation
   - `exchangeService.ts` has new methods: `placeRealOrder`, `closeRealPosition`, `fetchRealPositions`

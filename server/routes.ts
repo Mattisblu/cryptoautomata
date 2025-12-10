@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "crypto";
 import { storage } from "./storage";
-import { exchangeService, createTickerStream } from "./exchangeService";
+import { exchangeService, createTickerStream, createKlinesStream } from "./exchangeService";
 import { analyzeAndRespond } from "./openai";
 import { tradingBot } from "./tradingBot";
 import { strategyOrchestrator } from "./strategyOrchestrator";
@@ -46,19 +46,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const data = JSON.parse(message.toString());
         
         if (data.type === "subscribe" && data.symbol) {
-          const streamKey = `${data.exchange}:${data.symbol}`;
+          const tickerStreamKey = `ticker:${data.exchange}:${data.symbol}`;
+          const klinesStreamKey = `klines:${data.exchange}:${data.symbol}:${data.timeframe || "15m"}`;
           const wsStreams = clientStreams.get(ws);
           
           if (wsStreams) {
             // Stop ALL existing streams for this client - only one market should be active at a time
             wsStreams.forEach((stream, existingKey) => {
               stream.stop();
-              console.log(`Stopped ticker stream for ${existingKey} (switching to ${streamKey})`);
+              console.log(`Stopped stream for ${existingKey} (switching market)`);
             });
             wsStreams.clear();
 
             // Start new ticker stream for this client
-            const stream = createTickerStream(
+            const tickerStream = createTickerStream(
               data.exchange as Exchange,
               data.symbol,
               (streamData) => {
@@ -72,24 +73,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 }
               }
             );
-            wsStreams.set(streamKey, stream);
-            console.log(`Started ticker stream for ${streamKey}`);
-          }
+            wsStreams.set(tickerStreamKey, tickerStream);
+            console.log(`Started ticker stream for ${tickerStreamKey}`);
 
-          // Send initial klines - getKlines now returns KlinesResult with data source embedded
-          const klinesResult = await exchangeService.getKlines(
-            data.exchange as Exchange,
-            data.symbol,
-            data.timeframe || "15m",
-            100
-          );
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ 
-              type: "klines", 
-              data: klinesResult.klines,
-              dataSource: klinesResult.dataSource,
-              ...(klinesResult.dataError ? { dataError: klinesResult.dataError } : {})
-            }));
+            // Start new klines stream for this client - updates chart data periodically
+            const klinesStream = createKlinesStream(
+              data.exchange as Exchange,
+              data.symbol,
+              data.timeframe || "15m",
+              (streamData) => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ 
+                    type: "klines", 
+                    data: streamData.klines,
+                    dataSource: streamData.dataSource,
+                    ...(streamData.dataError ? { dataError: streamData.dataError } : {})
+                  }));
+                }
+              },
+              10000 // Update klines every 10 seconds
+            );
+            wsStreams.set(klinesStreamKey, klinesStream);
+            console.log(`Started klines stream for ${klinesStreamKey}`);
           }
         }
       } catch (error) {
