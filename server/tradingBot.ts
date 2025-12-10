@@ -590,6 +590,14 @@ class TradingBot {
     // Calculate volume analysis
     const volume = this.calculateVolumeAnalysis(klines);
 
+    // Log current indicator values for debugging
+    console.log(`[TradingBot] === Trade Check ===`);
+    console.log(`[TradingBot] Price: $${currentPrice.toFixed(4)} | Change: ${priceChange.toFixed(2)}%`);
+    console.log(`[TradingBot] MACD: ${macd.macdLine.toFixed(4)} | Signal: ${macd.signalLine.toFixed(4)} | Histogram: ${macd.histogram.toFixed(4)} | Trend: ${macd.trend} | Crossover: ${macd.crossover}`);
+    console.log(`[TradingBot] Volume: ${volume.volumeRatio.toFixed(2)}x avg | Spike: ${volume.isVolumeSpike} | High: ${volume.isHighVolume} | Trend: ${volume.volumeTrend}`);
+    console.log(`[TradingBot] SMA20: ${sma20.toFixed(4)} | SMA50: ${sma50.toFixed(4)} | Has Position: ${hasPosition}`);
+    console.log(`[TradingBot] Evaluating ${sortedRules.length} rules...`);
+
     // Rule evaluation with support for MACD, volume, and NUMERIC conditions
     for (const rule of sortedRules) {
       const condition = rule.condition.toLowerCase();
@@ -688,6 +696,65 @@ class TradingBot {
       ) {
         shouldTrigger = true;
         console.log(`[TradingBot] Immediate entry condition matched: "${rule.condition}"`);
+      }
+      
+      // --- Take Profit / Stop Loss based on percentage from entry ---
+      // Matches patterns like "price decreases by X%", "price increases by X%", "take profit", "stop loss"
+      else if (hasPosition && (condition.includes("take profit") || condition.includes("take-profit") || 
+               condition.includes("stop loss") || condition.includes("stop-loss") ||
+               condition.includes("price decreases") || condition.includes("price increases"))) {
+        // Extract percentage from condition
+        const percentMatch = condition.match(/(\d+\.?\d*)\s*%/);
+        if (percentMatch) {
+          const targetPercent = parseFloat(percentMatch[1]);
+          // Get entry price from position
+          const position = positions[0];
+          if (position && position.entryPrice) {
+            const entryPrice = position.entryPrice;
+            const pnlPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+            const isLong = position.side === "long";
+            
+            // For long positions: profit = price up, loss = price down
+            // For short positions: profit = price down, loss = price up
+            const effectivePnl = isLong ? pnlPercent : -pnlPercent;
+            
+            if (condition.includes("take profit") || condition.includes("take-profit") || 
+                (condition.includes("decreases") && !isLong) || (condition.includes("increases") && isLong)) {
+              // Take profit - trigger when profit exceeds target
+              if (effectivePnl >= targetPercent) {
+                shouldTrigger = true;
+                triggerDebugInfo = `Take profit: ${effectivePnl.toFixed(2)}% >= ${targetPercent}% target`;
+              }
+            } else if (condition.includes("stop loss") || condition.includes("stop-loss") ||
+                       (condition.includes("increases") && !isLong) || (condition.includes("decreases") && isLong)) {
+              // Stop loss - trigger when loss exceeds target (negative PnL)
+              if (effectivePnl <= -targetPercent) {
+                shouldTrigger = true;
+                triggerDebugInfo = `Stop loss: ${effectivePnl.toFixed(2)}% <= -${targetPercent}% limit`;
+              }
+            }
+            
+            if (!shouldTrigger) {
+              console.log(`[TradingBot] TP/SL check: PnL=${effectivePnl.toFixed(2)}% (entry=$${entryPrice}, current=$${currentPrice}, ${isLong ? 'LONG' : 'SHORT'})`);
+            }
+          }
+        }
+      }
+      
+      // --- Price level breakout/breakdown conditions ---
+      // Matches "price breaks below X", "price breaks above X"
+      else if (condition.includes("price breaks") || condition.includes("breaks below") || condition.includes("breaks above")) {
+        const priceMatch = condition.match(/(\d+\.?\d*)/);
+        if (priceMatch) {
+          const targetPrice = parseFloat(priceMatch[1]);
+          if (condition.includes("below") && currentPrice < targetPrice) {
+            shouldTrigger = true;
+            triggerDebugInfo = `Price broke below ${targetPrice}: current=${currentPrice.toFixed(4)}`;
+          } else if (condition.includes("above") && currentPrice > targetPrice) {
+            shouldTrigger = true;
+            triggerDebugInfo = `Price broke above ${targetPrice}: current=${currentPrice.toFixed(4)}`;
+          }
+        }
       }
       
       // Debug: Log unmatched conditions
