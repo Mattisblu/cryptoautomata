@@ -676,6 +676,24 @@ class TradingBot {
       } else if (condition.includes("has position") && hasPosition) {
         shouldTrigger = true;
       }
+      // --- Immediate Entry Conditions (always trigger if no position) ---
+      else if (
+        (condition.includes("immediate") || 
+         condition.includes("enter now") || 
+         condition.includes("market entry") ||
+         condition.includes("on start") ||
+         condition.includes("always enter") ||
+         condition.includes("entry signal")) && 
+        !hasPosition
+      ) {
+        shouldTrigger = true;
+        console.log(`[TradingBot] Immediate entry condition matched: "${rule.condition}"`);
+      }
+      
+      // Debug: Log unmatched conditions
+      if (!shouldTrigger) {
+        console.log(`[TradingBot] Rule not matched: "${rule.condition}" (action: ${rule.action})`);
+      }
 
       if (shouldTrigger) {
         // Build detailed reason with indicator values
