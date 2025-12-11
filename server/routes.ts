@@ -91,7 +91,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   }));
                 }
               },
-              10000 // Update klines every 10 seconds
+              3000 // Update klines every 3 seconds for higher resolution
             );
             wsStreams.set(klinesStreamKey, klinesStream);
             console.log(`Started klines stream for ${klinesStreamKey}`);

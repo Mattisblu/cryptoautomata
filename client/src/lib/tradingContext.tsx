@@ -63,6 +63,7 @@ interface TradingContextValue {
   setTicker: (ticker: Ticker | null) => void;
   klines: Kline[];
   setKlines: (klines: Kline[]) => void;
+  updateLastKline: (price: number) => void;
   dataSource: "live" | "simulated";
   setDataSource: (source: "live" | "simulated") => void;
   dataError: string | null;
@@ -145,6 +146,20 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [klines, setKlines] = useState<Kline[]>([]);
   const [dataSource, setDataSource] = useState<"live" | "simulated">("simulated");
   const [dataError, setDataError] = useState<string | null>(null);
+  
+  // Real-time candle update - updates the last kline with current price
+  const updateLastKline = useCallback((price: number) => {
+    setKlines(prev => {
+      if (prev.length === 0) return prev;
+      const updated = [...prev];
+      const lastKline = { ...updated[updated.length - 1] };
+      lastKline.close = price;
+      if (price > lastKline.high) lastKline.high = price;
+      if (price < lastKline.low) lastKline.low = price;
+      updated[updated.length - 1] = lastKline;
+      return updated;
+    });
+  }, []);
   
   // Positions & Orders
   const [positions, setPositions] = useState<Position[]>([]);
@@ -296,6 +311,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         setTicker,
         klines,
         setKlines,
+        updateLastKline,
         dataSource,
         setDataSource,
         dataError,

@@ -174,7 +174,7 @@ const TICKER_CACHE_TTL = 2000; // 2 seconds - prevents rapid duplicate calls
 
 // Klines result cache - prevents duplicate API calls for same symbol/timeframe within TTL  
 const klinesResultCache: Map<string, { result: KlinesResult; timestamp: number }> = new Map();
-const KLINES_CACHE_TTL = 5000; // 5 seconds - klines don't change as frequently
+const KLINES_CACHE_TTL = 2000; // 2 seconds - faster refresh for real-time updates
 
 // Per-exchange rate limiter - tracks last request time and enforces minimum delay
 const exchangeRateLimits: Map<Exchange, { lastRequest: number; requestQueue: Promise<void> }> = new Map();

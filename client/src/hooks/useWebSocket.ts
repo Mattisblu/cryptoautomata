@@ -10,6 +10,7 @@ export function useWebSocket() {
     timeframe,
     setTicker,
     setKlines,
+    updateLastKline,
     setDataSource,
     setDataError,
     setTradeCycleState,
@@ -72,8 +73,13 @@ export function useWebSocket() {
           const message = JSON.parse(event.data);
 
           switch (message.type) {
-            case "ticker":
-              setTicker(message.data as Ticker);
+            case "ticker": {
+              const tickerData = message.data as Ticker;
+              setTicker(tickerData);
+              // Real-time candle update - update last kline with current price
+              if (tickerData.lastPrice) {
+                updateLastKline(tickerData.lastPrice);
+              }
               if (message.dataSource) {
                 setDataSource(message.dataSource as "live" | "simulated");
               }
@@ -86,6 +92,7 @@ export function useWebSocket() {
                 lastHeartbeat: Date.now(),
               });
               break;
+            }
 
             case "klines":
               setKlines(message.data as Kline[]);
@@ -169,7 +176,7 @@ export function useWebSocket() {
     } catch (error) {
       console.error("WebSocket connection failed:", error);
     }
-  }, [selectedExchange, selectedMarket, timeframe, setTicker, setKlines, setDataSource, setDataError, setTradeCycleState, setOrders, setPositions, setConnectionState]);
+  }, [selectedExchange, selectedMarket, timeframe, setTicker, setKlines, updateLastKline, setDataSource, setDataError, setTradeCycleState, setOrders, setPositions, setConnectionState]);
 
   const subscribe = useCallback(
     (symbol: string, timeframe: string = "15m") => {
