@@ -41,13 +41,13 @@ export function AlgorithmStatus() {
     );
   }
 
-  const statusConfig = {
+  const statusConfig: Record<string, { icon: typeof Loader2; color: string; animate: boolean }> = {
     active: { icon: Loader2, color: "text-profit", animate: true },
     paused: { icon: AlertCircle, color: "text-yellow-500", animate: false },
     stopped: { icon: CheckCircle, color: "text-muted-foreground", animate: false },
   };
 
-  const config = statusConfig[activeAlgorithm.status];
+  const config = statusConfig[activeAlgorithm.status] || statusConfig.active;
   const StatusIcon = config.icon;
 
   return (
