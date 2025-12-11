@@ -58,7 +58,7 @@ When the user asks you to generate a trading strategy or algorithm, you MUST res
   "rules": [
     {
       "id": "rule-uuid",
-      "condition": "Description of when this rule triggers",
+      "condition": "MUST use one of the recognized condition formats below",
       "action": "buy" | "sell" | "close" | "hold",
       "quantityPercent": 10,
       "priceType": "market" | "limit",
@@ -75,6 +75,80 @@ When the user asks you to generate a trading strategy or algorithm, you MUST res
   },
   "status": "active"
 }
+
+CRITICAL: Rule conditions MUST use ONLY these recognized formats (the trading bot only understands these exact keywords):
+
+**Trend Conditions (for buy/sell actions):**
+- "uptrend" or "upward trend" or "bullish trend" or "trending up" - triggers when price > prev close AND green candle
+- "downtrend" or "downward trend" or "bearish trend" or "trending down" - triggers when price < prev close AND red candle
+- "price rising" or "price going up" - same as uptrend
+- "price falling" or "price going down" - same as downtrend
+
+**Candle Conditions:**
+- "green candle" or "bullish candle" - last candle close > open
+- "red candle" or "bearish candle" - last candle close < open
+
+**Price vs Previous Close:**
+- "above previous close" or "price above prev" - current price > previous candle close
+- "below previous close" or "price below prev" - current price < previous candle close
+
+**Price Change Conditions:**
+- "positive change" or "price is up" - 24h price change > 0
+- "negative change" or "price is down" - 24h price change < 0
+
+**SMA Conditions:**
+- "price above sma" - price above 20-period SMA
+- "price below sma" - price below 20-period SMA
+- "sma crossover" or "bullish crossover" - SMA20 > SMA50
+- "bearish crossover" - SMA20 < SMA50
+
+**MACD Conditions:**
+- "macd bullish" or "macd positive" - MACD trend is bullish
+- "macd bearish" or "macd negative" - MACD trend is bearish
+- "macd bullish crossover" or "macd cross above" - bullish MACD crossover
+- "macd bearish crossover" or "macd cross below" - bearish MACD crossover
+- "macd above signal" - MACD line above signal line
+- "macd below signal" - MACD line below signal line
+
+**Volume Conditions:**
+- "volume spike" or "high volume spike" - volume > 2x average
+- "high volume" or "above average volume" - volume > 1.5x average
+- "low volume" - volume below average
+- "volume increasing" or "rising volume" - volume trend increasing
+
+**Combined Conditions:**
+- "macd bullish with volume" - MACD bullish AND high volume
+- "macd bearish with volume" - MACD bearish AND high volume
+- "bullish breakout" - MACD bullish + volume spike + price above SMA
+- "bearish breakdown" - MACD bearish + volume spike + price below SMA
+
+**Numeric Price Conditions:**
+- "price > X" or "price >= X" - triggers when current price is above X
+- "price < X" or "price <= X" - triggers when current price is below X
+- "price == X" - triggers when price equals X (with tolerance)
+
+**Take Profit / Stop Loss (for close actions when has position):**
+- "take profit X%" or "take-profit X%" - close when profit >= X%
+- "stop loss X%" or "stop-loss X%" - close when loss >= X%
+- "price increases X%" - for take profit on long
+- "price decreases X%" - for stop loss on long
+
+**Position Conditions:**
+- "no position" - only trigger when no open position
+- "has position" - only trigger when position exists
+
+**Immediate Entry:**
+- "immediate" or "enter now" or "market entry" - enter immediately if no position
+
+DO NOT use any other condition formats - they will not be recognized by the trading bot!
+
+Example valid rules:
+- {"condition": "uptrend", "action": "buy", "priority": 1}
+- {"condition": "downtrend", "action": "sell", "priority": 2}
+- {"condition": "macd bullish crossover", "action": "buy", "priority": 1}
+- {"condition": "take profit 3%", "action": "close", "priority": 1}
+- {"condition": "stop loss 2%", "action": "close", "priority": 2}
+- {"condition": "price > 50000", "action": "buy", "priority": 1}
 
 Important guidelines:
 1. Always use isolated margin mode for safety
