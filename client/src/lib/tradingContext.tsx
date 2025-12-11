@@ -103,10 +103,52 @@ interface TradingContextValue {
 const TradingContext = createContext<TradingContextValue | null>(null);
 
 export function TradingProvider({ children }: { children: ReactNode }) {
-  // Exchange & Market state
-  const [selectedExchange, setSelectedExchange] = useState<Exchange | null>(null);
-  const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
+  // Exchange & Market state - restored from localStorage
+  const [selectedExchange, setSelectedExchangeState] = useState<Exchange | null>(() => {
+    try {
+      const saved = localStorage.getItem("selectedExchange");
+      return saved ? (saved as Exchange) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [selectedMarket, setSelectedMarketState] = useState<Market | null>(() => {
+    try {
+      const saved = localStorage.getItem("selectedMarket");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [markets, setMarkets] = useState<Market[]>([]);
+  
+  // Persist exchange selection
+  const setSelectedExchange = useCallback((exchange: Exchange | null) => {
+    setSelectedExchangeState(exchange);
+    try {
+      if (exchange) {
+        localStorage.setItem("selectedExchange", exchange);
+      } else {
+        localStorage.removeItem("selectedExchange");
+      }
+    } catch (e) {
+      console.warn("Failed to save exchange to localStorage:", e);
+    }
+  }, []);
+  
+  // Persist market selection
+  const setSelectedMarket = useCallback((market: Market | null) => {
+    setSelectedMarketState(market);
+    try {
+      if (market) {
+        localStorage.setItem("selectedMarket", JSON.stringify(market));
+      } else {
+        localStorage.removeItem("selectedMarket");
+      }
+    } catch (e) {
+      console.warn("Failed to save market to localStorage:", e);
+    }
+  }, []);
   
   // Trading mode
   const [tradingMode, setTradingMode] = useState<TradingMode>("ai-trading");
@@ -123,8 +165,25 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   // Live strategy metrics
   const [liveMetrics, setLiveMetrics] = useState<LiveStrategyMetrics | null>(null);
   
-  // Chart timeframe
-  const [timeframe, setTimeframe] = useState<string>("15m");
+  // Chart timeframe - restored from localStorage
+  const [timeframe, setTimeframeState] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem("chartTimeframe");
+      return saved || "15m";
+    } catch {
+      return "15m";
+    }
+  });
+  
+  // Persist timeframe selection
+  const setTimeframe = useCallback((tf: string) => {
+    setTimeframeState(tf);
+    try {
+      localStorage.setItem("chartTimeframe", tf);
+    } catch (e) {
+      console.warn("Failed to save timeframe to localStorage:", e);
+    }
+  }, []);
   
   // Risk parameters (initialized with defaults so AI always has context)
   const defaultRiskParams: RiskParameters = {
