@@ -110,6 +110,7 @@ export interface IStorage {
     endDate?: Date;
   }): Promise<Trade[]>;
   getTrade(id: number): Promise<Trade | null>;
+  clearTrades(): Promise<void>;
   getTradeAnalytics(exchange?: string): Promise<{
     totalTrades: number;
     winningTrades: number;
@@ -642,6 +643,10 @@ export class MemStorage implements IStorage {
   async getTrade(id: number): Promise<Trade | null> {
     const [trade] = await db.select().from(trades).where(eq(trades.id, id));
     return trade || null;
+  }
+
+  async clearTrades(): Promise<void> {
+    await db.delete(trades);
   }
 
   async getTradeAnalytics(exchange?: string): Promise<{

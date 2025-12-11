@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import {
   Clock,
   FileText,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "wouter";
@@ -198,6 +200,22 @@ export default function Analytics() {
   const analytics = analyticsData?.analytics;
   const trades = tradesData?.trades || [];
 
+  const clearTradesMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", "/api/trades"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/analytics"] });
+    },
+  });
+
+  const clearingTrades = clearTradesMutation.isPending;
+
+  const handleClearTrades = () => {
+    if (window.confirm("Are you sure you want to clear all trade history? This cannot be undone.")) {
+      clearTradesMutation.mutate();
+    }
+  };
+
   const winLossData = analytics ? [
     { name: "Wins", value: analytics.winningTrades, color: "hsl(var(--profit))" },
     { name: "Losses", value: analytics.losingTrades, color: "hsl(var(--loss))" },
@@ -249,6 +267,8 @@ export default function Analytics() {
                 <SelectItem value="all">All Exchanges</SelectItem>
                 <SelectItem value="coinstore">Coinstore</SelectItem>
                 <SelectItem value="bydfi">BYDFI</SelectItem>
+                <SelectItem value="toobit">Toobit</SelectItem>
+                <SelectItem value="bitunix">Bitunix</SelectItem>
               </SelectContent>
             </Select>
             <Button variant="outline" size="icon" onClick={handleRefresh} data-testid="button-refresh">
@@ -409,16 +429,31 @@ export default function Analytics() {
                 <Clock className="w-4 h-4 text-primary" />
                 Trade History
               </CardTitle>
-              <Select value={tradeLimit} onValueChange={setTradeLimit}>
-                <SelectTrigger className="w-24" data-testid="select-trade-limit">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="25">25</SelectItem>
-                  <SelectItem value="50">50</SelectItem>
-                  <SelectItem value="100">100</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                {trades.length > 0 && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="text-xs text-muted-foreground hover:text-destructive"
+                    onClick={handleClearTrades}
+                    disabled={clearingTrades}
+                    data-testid="button-clear-trades"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    {clearingTrades ? "Clearing..." : "Clear"}
+                  </Button>
+                )}
+                <Select value={tradeLimit} onValueChange={setTradeLimit}>
+                  <SelectTrigger className="w-24" data-testid="select-trade-limit">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">

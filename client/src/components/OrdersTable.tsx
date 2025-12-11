@@ -1,4 +1,4 @@
-import { Clock, CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-react";
+import { Clock, CheckCircle, XCircle, AlertCircle, Loader2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -128,12 +128,16 @@ function OrderRow({ order }: { order: Order }) {
 }
 
 export function OrdersTable() {
-  const { orders, connectionState } = useTradingContext();
+  const { orders, setOrders, connectionState } = useTradingContext();
   const isLoading = connectionState.status === "connecting";
 
   const recentOrders = orders
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 20);
+
+  const handleClearOrders = () => {
+    setOrders([]);
+  };
 
   return (
     <Card data-testid="orders-table">
@@ -147,11 +151,25 @@ export function OrdersTable() {
               </Badge>
             )}
           </CardTitle>
-          {orders.length > 20 && (
-            <Button variant="ghost" size="sm" className="text-xs">
-              View all
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {orders.length > 0 && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-xs text-muted-foreground hover:text-destructive"
+                onClick={handleClearOrders}
+                data-testid="button-clear-orders"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                Clear
+              </Button>
+            )}
+            {orders.length > 20 && (
+              <Button variant="ghost" size="sm" className="text-xs">
+                View all
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-0">

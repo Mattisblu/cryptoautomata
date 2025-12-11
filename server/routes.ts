@@ -1381,6 +1381,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Clear all trades
+  app.delete("/api/trades", async (req, res) => {
+    try {
+      await storage.clearTrades();
+      res.json({ success: true, message: "All trades cleared" });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   // Get trade analytics/statistics
   app.get("/api/analytics", async (req, res) => {
     try {
