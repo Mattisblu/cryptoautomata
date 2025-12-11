@@ -436,6 +436,11 @@ export interface RiskManagement {
   autoStopLoss: boolean;       // Auto-create SL orders on position open
   autoTakeProfit: boolean;     // Auto-create TP orders on position open
   breakEvenTrigger?: number;   // Move SL to break-even after X% profit
+  // Frequency controls (null = disabled)
+  tradeCooldownSeconds?: number | null;    // Wait time after closing before next entry
+  maxTradesPerHour?: number | null;        // Hard cap on trades per hour
+  minHoldTimeSeconds?: number | null;      // Minimum time to hold a position
+  maxConcurrentPositions?: number | null;  // Limit open positions at once
 }
 
 // Risk parameters configuration schema for UI
@@ -450,6 +455,11 @@ export const riskParametersSchema = z.object({
   autoStopLoss: z.boolean().default(true),
   autoTakeProfit: z.boolean().default(true),
   breakEvenTrigger: z.number().min(0.5).max(50).optional(),
+  // Frequency controls - null means disabled
+  tradeCooldownSeconds: z.number().min(5).max(3600).nullable().optional(),
+  maxTradesPerHour: z.number().min(1).max(100).nullable().optional(),
+  minHoldTimeSeconds: z.number().min(5).max(3600).nullable().optional(),
+  maxConcurrentPositions: z.number().min(1).max(10).nullable().optional(),
 });
 
 export type RiskParameters = z.infer<typeof riskParametersSchema>;
