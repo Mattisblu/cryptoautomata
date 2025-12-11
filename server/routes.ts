@@ -887,6 +887,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate a sessionId for tracking this trading session
       const sessionId = randomUUID();
 
+      // If bot is already running, stop it first to allow restart with new parameters
+      if (tradingBot.isRunning()) {
+        console.log("[Trading] Stopping existing bot before starting new session");
+        await tradingBot.stop();
+        
+        // Also clean up any previous running strategy
+        const prevState = await storage.getTradeCycleState();
+        if (prevState?.sessionId) {
+          await storage.stopRunningStrategy(prevState.sessionId);
+          broadcast("strategyStopped", { sessionId: prevState.sessionId });
+        }
+      }
+
       // Start trading bot if algorithm available
       const selectedTimeframe = timeframe || "15m"; // Default to 15m if not provided
       if (algorithm) {
