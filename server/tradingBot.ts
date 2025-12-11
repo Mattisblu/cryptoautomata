@@ -14,6 +14,7 @@ interface TradingBotConfig {
   algorithm: TradingAlgorithm;
   executionMode: ExecutionMode;
   optimizationMode: OptimizationMode;
+  timeframe: string; // User-selected timeframe for klines analysis (1m, 5m, 15m, etc.)
   checkIntervalMs?: number;
   onOptimizationSuggestion?: (suggestion: Omit<OptimizationSuggestion, "id" | "timestamp">) => void;
   onMetricsUpdate?: (metrics: LiveStrategyMetrics) => void;
@@ -348,14 +349,14 @@ class TradingBot {
     if (!this.config || this.state.isPaused) return;
 
     try {
-      const { exchange, symbol, algorithm, executionMode } = this.config;
+      const { exchange, symbol, algorithm, executionMode, timeframe } = this.config;
       
       // Get exchange-specific configuration
       const exchangeInfo = exchangeService.getExchangeInfo(exchange);
       
       // Get current market data - getTicker/getKlines now return result types
       const tickerResult = await exchangeService.getTicker(exchange, symbol);
-      const klinesResult = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      const klinesResult = await exchangeService.getKlines(exchange, symbol, timeframe, 50);
       const ticker = tickerResult.ticker;
       const klines = klinesResult.klines;
       

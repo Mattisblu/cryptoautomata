@@ -64,6 +64,7 @@ export function TradeCycleControls() {
     setOptimizationMode,
     positions,
     activeAlgorithm,
+    timeframe,
   } = useTradingContext();
   const { toast } = useToast();
   const [showCloseAllDialog, setShowCloseAllDialog] = useState(false);
@@ -84,6 +85,7 @@ export function TradeCycleControls() {
         symbol: selectedMarket?.symbol,
         algorithmId: activeAlgorithm?.id,
         exchange: selectedExchange,
+        timeframe, // Pass user-selected timeframe to trading bot
       });
     },
     onSuccess: () => {

@@ -20,6 +20,7 @@ interface BotInstance {
   algorithm: TradingAlgorithm;
   executionMode: ExecutionMode;
   optimizationMode: OptimizationMode;
+  timeframe: string;
   checkInterval: NodeJS.Timeout | null;
   isRunning: boolean;
   isPaused: boolean;
@@ -36,6 +37,7 @@ interface StartStrategyConfig {
   algorithm: TradingAlgorithm;
   executionMode: ExecutionMode;
   optimizationMode: OptimizationMode;
+  timeframe?: string; // User-selected timeframe for klines analysis
   onOptimizationSuggestion?: (suggestion: Omit<OptimizationSuggestion, "id" | "timestamp">) => void;
   onMetricsUpdate?: (metrics: LiveStrategyMetrics) => void;
   onAlgorithmUpdate?: (algorithm: TradingAlgorithm) => void;
@@ -104,7 +106,7 @@ class StrategyOrchestrator {
   }
 
   async startStrategy(config: StartStrategyConfig): Promise<string> {
-    const { exchange, symbol, algorithm, executionMode, optimizationMode } = config;
+    const { exchange, symbol, algorithm, executionMode, optimizationMode, timeframe = "15m" } = config;
     
     const existingOnMarket = await storage.getRunningStrategyByMarket(exchange, symbol);
     if (existingOnMarket) {
@@ -137,6 +139,7 @@ class StrategyOrchestrator {
       algorithm,
       executionMode,
       optimizationMode,
+      timeframe,
       checkInterval: null,
       isRunning: true,
       isPaused: false,
@@ -325,12 +328,12 @@ class StrategyOrchestrator {
     if (!instance || instance.isPaused) return;
 
     try {
-      const { exchange, symbol, algorithm, executionMode } = instance;
+      const { exchange, symbol, algorithm, executionMode, timeframe } = instance;
       
       const exchangeInfo = exchangeService.getExchangeInfo(exchange);
       // getTicker/getKlines now return result types with data source embedded
       const tickerResult = await exchangeService.getTicker(exchange, symbol);
-      const klinesResult = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      const klinesResult = await exchangeService.getKlines(exchange, symbol, timeframe, 50);
       const ticker = tickerResult.ticker;
       const klines = klinesResult.klines;
       

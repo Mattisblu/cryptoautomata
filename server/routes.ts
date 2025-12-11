@@ -856,7 +856,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/trading/start", async (req, res) => {
     try {
-      const { mode, executionMode, optimizationMode, symbol, algorithmId, exchange } = req.body;
+      const { mode, executionMode, optimizationMode, symbol, algorithmId, exchange, timeframe } = req.body;
 
       if (!symbol) {
         return res.status(400).json({ success: false, error: "Symbol required" });
@@ -888,6 +888,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sessionId = randomUUID();
 
       // Start trading bot if algorithm available
+      const selectedTimeframe = timeframe || "15m"; // Default to 15m if not provided
       if (algorithm) {
         await tradingBot.start({
           exchange: exchangeName,
@@ -895,6 +896,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           algorithm,
           executionMode: execMode,
           optimizationMode: optMode,
+          timeframe: selectedTimeframe,
           checkIntervalMs: mode === "ai-scalping" ? 2000 : 5000,
           onOptimizationSuggestion: (suggestion) => {
             broadcast("optimizationSuggestion", { ...suggestion, sessionId });
@@ -1122,7 +1124,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/strategies/:algorithmId/start", async (req, res) => {
     try {
       const { algorithmId } = req.params;
-      const { exchange, symbol, executionMode, optimizationMode } = req.body;
+      const { exchange, symbol, executionMode, optimizationMode, timeframe } = req.body;
 
       if (!exchange || !symbol) {
         return res.status(400).json({ success: false, error: "Exchange and symbol are required" });
@@ -1144,6 +1146,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         algorithm,
         executionMode: executionMode || "paper",
         optimizationMode: optimizationMode || "manual",
+        timeframe: timeframe || "15m",
         onOptimizationSuggestion: (suggestion) => {
           broadcast("optimizationSuggestion", { ...suggestion, sessionId });
         },

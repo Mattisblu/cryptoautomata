@@ -8,11 +8,16 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: December 2024
 
 ## Recent Changes
-- **Continuous Klines Streaming**: Fixed issue where chart data wasn't updating
-  - Created `createKlinesStream()` function to stream klines every 10 seconds
-  - WebSocket now starts both ticker stream (2s) AND klines stream (10s) on subscription
-  - MACD and other indicators now update as new candle data arrives
-  - Chart data refreshes continuously instead of only on initial load
+- **User-Selectable Timeframe for Trading Bot**: Bot now uses the chart timeframe you select
+  - Frontend passes selected timeframe (1m, 5m, 15m, etc.) when starting trading
+  - Bot analyzes candles at the selected resolution for faster/slower MACD signals
+  - StrategyOrchestrator also supports timeframe selection for multi-strategy mode
+  - Default: 15m if not specified
+- **High-Resolution Real-Time Updates**: Improved chart and MACD refresh rates
+  - Klines stream interval reduced from 10s to 3s
+  - Cache TTL reduced from 5s to 2s for fresher data
+  - Real-time candle updates: current candle updates with each ticker (every 2s)
+  - Chart shows live price movement within the current candle
 - **Rule Editor GUI**: Added visual editor for trading algorithm rules
   - Form-based editing for entry/exit rules and risk management
   - JSON mode for advanced editing
