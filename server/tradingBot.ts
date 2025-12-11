@@ -872,6 +872,94 @@ class TradingBot {
         }
       }
 
+      // --- Simple Trend Conditions (uptrend/downtrend based on recent price action) ---
+      // Get the last few candles to determine trend
+      else if (condition.includes("uptrend") || condition.includes("upward trend") || 
+               condition.includes("trending up") || condition.includes("bullish trend") ||
+               condition.includes("price rising") || condition.includes("price going up")) {
+        // Check if last candle is green (close > open) and price is above previous close
+        if (klines.length >= 2) {
+          const lastCandle = klines[klines.length - 1];
+          const prevCandle = klines[klines.length - 2];
+          const isGreenCandle = lastCandle.close > lastCandle.open;
+          const priceAbovePrevClose = currentPrice > prevCandle.close;
+          if (isGreenCandle && priceAbovePrevClose) {
+            shouldTrigger = true;
+            triggerDebugInfo = `Uptrend detected: price=$${currentPrice.toFixed(2)} > prev close=$${prevCandle.close.toFixed(2)}, candle green`;
+          }
+        }
+      } else if (condition.includes("downtrend") || condition.includes("downward trend") || 
+                 condition.includes("trending down") || condition.includes("bearish trend") ||
+                 condition.includes("price falling") || condition.includes("price going down")) {
+        // Check if last candle is red (close < open) and price is below previous close
+        if (klines.length >= 2) {
+          const lastCandle = klines[klines.length - 1];
+          const prevCandle = klines[klines.length - 2];
+          const isRedCandle = lastCandle.close < lastCandle.open;
+          const priceBelowPrevClose = currentPrice < prevCandle.close;
+          if (isRedCandle && priceBelowPrevClose) {
+            shouldTrigger = true;
+            triggerDebugInfo = `Downtrend detected: price=$${currentPrice.toFixed(2)} < prev close=$${prevCandle.close.toFixed(2)}, candle red`;
+          }
+        }
+      }
+      // --- Green/Red Candle Conditions ---
+      else if (condition.includes("green candle") || condition.includes("bullish candle") || 
+               condition.includes("candle closes above") || condition.includes("close above open") ||
+               condition.includes("closes above its open")) {
+        if (klines.length >= 1) {
+          const lastCandle = klines[klines.length - 1];
+          if (lastCandle.close > lastCandle.open) {
+            shouldTrigger = true;
+            triggerDebugInfo = `Green candle: close=$${lastCandle.close.toFixed(2)} > open=$${lastCandle.open.toFixed(2)}`;
+          }
+        }
+      } else if (condition.includes("red candle") || condition.includes("bearish candle") || 
+                 condition.includes("candle closes below") || condition.includes("close below open") ||
+                 condition.includes("closes below its open")) {
+        if (klines.length >= 1) {
+          const lastCandle = klines[klines.length - 1];
+          if (lastCandle.close < lastCandle.open) {
+            shouldTrigger = true;
+            triggerDebugInfo = `Red candle: close=$${lastCandle.close.toFixed(2)} < open=$${lastCandle.open.toFixed(2)}`;
+          }
+        }
+      }
+      // --- Price vs Previous Close Conditions ---
+      else if (condition.includes("above previous close") || condition.includes("price above prev") ||
+               condition.includes("ticker above previous") || condition.includes("above the previous close")) {
+        if (klines.length >= 2) {
+          const prevCandle = klines[klines.length - 2];
+          if (currentPrice > prevCandle.close) {
+            shouldTrigger = true;
+            triggerDebugInfo = `Price above previous close: $${currentPrice.toFixed(2)} > $${prevCandle.close.toFixed(2)}`;
+          }
+        }
+      } else if (condition.includes("below previous close") || condition.includes("price below prev") ||
+                 condition.includes("ticker below previous") || condition.includes("below the previous close")) {
+        if (klines.length >= 2) {
+          const prevCandle = klines[klines.length - 2];
+          if (currentPrice < prevCandle.close) {
+            shouldTrigger = true;
+            triggerDebugInfo = `Price below previous close: $${currentPrice.toFixed(2)} < $${prevCandle.close.toFixed(2)}`;
+          }
+        }
+      }
+      // --- Positive/Negative Price Change Conditions ---
+      else if (condition.includes("positive change") || condition.includes("price change positive") ||
+               condition.includes("price is up") || condition.includes("gaining")) {
+        if (priceChange > 0) {
+          shouldTrigger = true;
+          triggerDebugInfo = `Positive price change: ${priceChange.toFixed(2)}%`;
+        }
+      } else if (condition.includes("negative change") || condition.includes("price change negative") ||
+                 condition.includes("price is down") || condition.includes("losing")) {
+        if (priceChange < 0) {
+          shouldTrigger = true;
+          triggerDebugInfo = `Negative price change: ${priceChange.toFixed(2)}%`;
+        }
+      }
+
       // --- Price/Market Conditions ---
       else if (condition.includes("oversold") && priceChange < -2) {
         shouldTrigger = true;
