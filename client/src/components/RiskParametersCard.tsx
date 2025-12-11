@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useTradingContext } from "@/lib/tradingContext";
-import { Shield, TrendingUp, TrendingDown, Activity, Save, RefreshCw, AlertTriangle } from "lucide-react";
+import { Shield, TrendingUp, TrendingDown, Activity, Save, RefreshCw, AlertTriangle, Clock, Gauge, Timer, Layers } from "lucide-react";
 import type { RiskParameters } from "@shared/schema";
 
 const defaultRiskParams: RiskParameters = {
@@ -25,6 +25,11 @@ const defaultRiskParams: RiskParameters = {
   autoStopLoss: true,
   autoTakeProfit: true,
   breakEvenTrigger: 2,
+  // Frequency controls - null = disabled by default
+  tradeCooldownSeconds: null,
+  maxTradesPerHour: null,
+  minHoldTimeSeconds: null,
+  maxConcurrentPositions: null,
 };
 
 interface InputState {
@@ -341,6 +346,146 @@ export function RiskParametersCard() {
             data-testid="slider-break-even"
             className="w-full"
           />
+        </div>
+
+        <Separator />
+
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Gauge className="h-4 w-4 text-purple-500" />
+            <Label className="text-sm font-medium">Frequency Controls</Label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Control trade timing for scalping. Toggle each to enable.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-purple-400" />
+              <Label className="text-sm">Trade Cooldown</Label>
+            </div>
+            <Switch
+              checked={params.tradeCooldownSeconds !== null && params.tradeCooldownSeconds !== undefined}
+              onCheckedChange={(checked) => updateParam('tradeCooldownSeconds', checked ? 30 : null)}
+              data-testid="switch-trade-cooldown"
+            />
+          </div>
+          
+          {params.tradeCooldownSeconds !== null && params.tradeCooldownSeconds !== undefined && (
+            <div className="space-y-2 pl-6">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Wait after close</span>
+                <span className="font-mono text-purple-400">{params.tradeCooldownSeconds}s</span>
+              </div>
+              <Slider
+                value={[params.tradeCooldownSeconds]}
+                onValueChange={([value]) => updateParam('tradeCooldownSeconds', value)}
+                min={5}
+                max={300}
+                step={5}
+                data-testid="slider-trade-cooldown"
+                className="w-full"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Gauge className="h-4 w-4 text-purple-400" />
+              <Label className="text-sm">Max Trades/Hour</Label>
+            </div>
+            <Switch
+              checked={params.maxTradesPerHour !== null && params.maxTradesPerHour !== undefined}
+              onCheckedChange={(checked) => updateParam('maxTradesPerHour', checked ? 10 : null)}
+              data-testid="switch-max-trades-hour"
+            />
+          </div>
+          
+          {params.maxTradesPerHour !== null && params.maxTradesPerHour !== undefined && (
+            <div className="space-y-2 pl-6">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Max per hour</span>
+                <span className="font-mono text-purple-400">{params.maxTradesPerHour}</span>
+              </div>
+              <Slider
+                value={[params.maxTradesPerHour]}
+                onValueChange={([value]) => updateParam('maxTradesPerHour', value)}
+                min={1}
+                max={60}
+                step={1}
+                data-testid="slider-max-trades-hour"
+                className="w-full"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Timer className="h-4 w-4 text-purple-400" />
+              <Label className="text-sm">Min Hold Time</Label>
+            </div>
+            <Switch
+              checked={params.minHoldTimeSeconds !== null && params.minHoldTimeSeconds !== undefined}
+              onCheckedChange={(checked) => updateParam('minHoldTimeSeconds', checked ? 15 : null)}
+              data-testid="switch-min-hold-time"
+            />
+          </div>
+          
+          {params.minHoldTimeSeconds !== null && params.minHoldTimeSeconds !== undefined && (
+            <div className="space-y-2 pl-6">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Hold at least</span>
+                <span className="font-mono text-purple-400">{params.minHoldTimeSeconds}s</span>
+              </div>
+              <Slider
+                value={[params.minHoldTimeSeconds]}
+                onValueChange={([value]) => updateParam('minHoldTimeSeconds', value)}
+                min={5}
+                max={300}
+                step={5}
+                data-testid="slider-min-hold-time"
+                className="w-full"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-purple-400" />
+              <Label className="text-sm">Max Concurrent Positions</Label>
+            </div>
+            <Switch
+              checked={params.maxConcurrentPositions !== null && params.maxConcurrentPositions !== undefined}
+              onCheckedChange={(checked) => updateParam('maxConcurrentPositions', checked ? 1 : null)}
+              data-testid="switch-max-concurrent"
+            />
+          </div>
+          
+          {params.maxConcurrentPositions !== null && params.maxConcurrentPositions !== undefined && (
+            <div className="space-y-2 pl-6">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Max open</span>
+                <span className="font-mono text-purple-400">{params.maxConcurrentPositions}</span>
+              </div>
+              <Slider
+                value={[params.maxConcurrentPositions]}
+                onValueChange={([value]) => updateParam('maxConcurrentPositions', value)}
+                min={1}
+                max={5}
+                step={1}
+                data-testid="slider-max-concurrent"
+                className="w-full"
+              />
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2 pt-2">

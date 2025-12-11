@@ -5,7 +5,9 @@ import type {
   OptimizationMode, 
   OptimizationSuggestion, 
   LiveStrategyMetrics,
-  RunningStrategy 
+  RunningStrategy,
+  RiskManagement,
+  Position 
 } from "@shared/schema";
 import { storage } from "./storage";
 import { exchangeService } from "./exchangeService";
@@ -26,6 +28,10 @@ interface BotInstance {
   isPaused: boolean;
   totalTrades: number;
   successfulTrades: number;
+  // Frequency control tracking
+  lastTradeTime: number;
+  tradesThisHour: number[];
+  positionOpenTimes: Map<string, number>;
   onOptimizationSuggestion?: (suggestion: Omit<OptimizationSuggestion, "id" | "timestamp">) => void;
   onMetricsUpdate?: (metrics: LiveStrategyMetrics) => void;
   onAlgorithmUpdate?: (algorithm: TradingAlgorithm) => void;
@@ -145,6 +151,10 @@ class StrategyOrchestrator {
       isPaused: false,
       totalTrades: 0,
       successfulTrades: 0,
+      // Frequency control tracking
+      lastTradeTime: 0,
+      tradesThisHour: [],
+      positionOpenTimes: new Map(),
       onOptimizationSuggestion: config.onOptimizationSuggestion,
       onMetricsUpdate: config.onMetricsUpdate,
       onAlgorithmUpdate: config.onAlgorithmUpdate,
@@ -294,6 +304,9 @@ class StrategyOrchestrator {
     for (const position of symbolPositions) {
       await exchangeService.closePosition(instance.exchange, credentials, position.id);
       await storage.deletePosition(instance.exchange, position.id);
+      // Record position close for frequency control
+      this.recordPositionClose(instance, position.id);
+      this.recordTradeExecution(instance);
     }
 
     await storage.addTradeLog({
@@ -321,6 +334,75 @@ class StrategyOrchestrator {
 
   isAnyStrategyRunning(): boolean {
     return this.bots.size > 0;
+  }
+
+  // Check if frequency controls allow a new trade
+  private checkFrequencyControls(instance: BotInstance, positions: Position[], action: string): { allowed: boolean; reason?: string } {
+    const riskManagement = instance.algorithm.riskManagement;
+    const now = Date.now();
+    
+    // 1. Trade Cooldown check (for new entries only)
+    if ((action === "buy" || action === "sell") && riskManagement.tradeCooldownSeconds) {
+      const cooldownMs = riskManagement.tradeCooldownSeconds * 1000;
+      const timeSinceLastTrade = now - instance.lastTradeTime;
+      if (instance.lastTradeTime > 0 && timeSinceLastTrade < cooldownMs) {
+        const remainingSeconds = Math.ceil((cooldownMs - timeSinceLastTrade) / 1000);
+        return { allowed: false, reason: `Trade cooldown: ${remainingSeconds}s remaining` };
+      }
+    }
+    
+    // 2. Max Trades Per Hour check
+    if (riskManagement.maxTradesPerHour) {
+      // Clean up old trades (older than 1 hour)
+      const oneHourAgo = now - 60 * 60 * 1000;
+      instance.tradesThisHour = instance.tradesThisHour.filter(t => t > oneHourAgo);
+      
+      if (instance.tradesThisHour.length >= riskManagement.maxTradesPerHour) {
+        return { allowed: false, reason: `Max trades/hour reached: ${instance.tradesThisHour.length}/${riskManagement.maxTradesPerHour}` };
+      }
+    }
+    
+    // 3. Max Concurrent Positions check (for new entries only)
+    if ((action === "buy" || action === "sell") && riskManagement.maxConcurrentPositions) {
+      if (positions.length >= riskManagement.maxConcurrentPositions) {
+        return { allowed: false, reason: `Max concurrent positions: ${positions.length}/${riskManagement.maxConcurrentPositions}` };
+      }
+    }
+    
+    // 4. Min Hold Time check (for close actions only)
+    if (action === "close" && riskManagement.minHoldTimeSeconds && positions.length > 0) {
+      const minHoldMs = riskManagement.minHoldTimeSeconds * 1000;
+      // Check if any position was opened too recently
+      for (const pos of positions) {
+        const openTime = instance.positionOpenTimes.get(pos.id);
+        if (openTime) {
+          const holdTime = now - openTime;
+          if (holdTime < minHoldMs) {
+            const remainingSeconds = Math.ceil((minHoldMs - holdTime) / 1000);
+            return { allowed: false, reason: `Min hold time: ${remainingSeconds}s remaining for ${pos.symbol}` };
+          }
+        }
+      }
+    }
+    
+    return { allowed: true };
+  }
+
+  // Track that a trade was executed
+  private recordTradeExecution(instance: BotInstance, positionId?: string): void {
+    const now = Date.now();
+    instance.lastTradeTime = now;
+    instance.tradesThisHour.push(now);
+    
+    // Track position open time if this is a new position
+    if (positionId) {
+      instance.positionOpenTimes.set(positionId, now);
+    }
+  }
+
+  // Remove position from tracking when closed
+  private recordPositionClose(instance: BotInstance, positionId: string): void {
+    instance.positionOpenTimes.delete(positionId);
   }
 
   private async executeTradeCheck(sessionId: string): Promise<void> {
@@ -354,6 +436,14 @@ class StrategyOrchestrator {
       );
 
       if (decision.action !== "hold") {
+        // Check frequency controls before executing
+        const frequencyCheck = this.checkFrequencyControls(instance, symbolPositions, decision.action);
+        if (!frequencyCheck.allowed) {
+          // Log but don't execute
+          console.log(`[FrequencyControl] Session ${sessionId} blocked: ${frequencyCheck.reason}`);
+          return;
+        }
+        
         await this.executeDecision(instance, decision, ticker, exchangeInfo);
       }
 
@@ -918,8 +1008,9 @@ class StrategyOrchestrator {
 
         await storage.addOrder(exchange, order);
 
+        const positionId = randomUUID();
         const position = {
-          id: randomUUID(),
+          id: positionId,
           symbol,
           side: decision.action === "buy" ? "long" : "short",
           quantity,
@@ -933,6 +1024,10 @@ class StrategyOrchestrator {
         };
 
         await storage.updatePosition(exchange, position as any);
+        
+        // Record trade execution for frequency control
+        this.recordTradeExecution(instance, positionId);
+        
         instance.successfulTrades++;
 
         await notificationService.notifyTradeOpen(

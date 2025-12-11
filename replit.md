@@ -8,6 +8,13 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: December 2024
 
 ## Recent Changes
+- **Scalping Frequency Controls**: New trade frequency limits for scalping strategies
+  - `tradeCooldownSeconds`: Wait time after closing before next trade (default: disabled)
+  - `maxTradesPerHour`: Hard cap on trades per hour (default: disabled)
+  - `minHoldTimeSeconds`: Minimum time to hold a position (default: disabled)
+  - `maxConcurrentPositions`: Limit open positions at once (default: disabled)
+  - All controls disabled by default for A/B testing each setting's effect on win/loss rates
+  - UI toggles in Risk Parameters panel with purple-themed controls
 - **User-Selectable Timeframe for Trading Bot**: Bot now uses the chart timeframe you select
   - Frontend passes selected timeframe (1m, 5m, 15m, etc.) when starting trading
   - Bot analyzes candles at the selected resolution for faster/slower MACD signals

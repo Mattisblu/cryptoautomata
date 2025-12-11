@@ -29,6 +29,10 @@ interface TradingBotState {
   executionMode: ExecutionMode;
   totalTrades: number;
   successfulTrades: number;
+  // Frequency control tracking
+  lastTradeTime: number;        // Timestamp of last trade for cooldown
+  tradesThisHour: number[];     // Timestamps of trades in the last hour
+  positionOpenTimes: Map<string, number>; // positionId -> openTime for min hold time
 }
 
 // Known rule patterns that the bot can understand
@@ -79,6 +83,10 @@ class TradingBot {
     executionMode: "paper",
     totalTrades: 0,
     successfulTrades: 0,
+    // Frequency control tracking
+    lastTradeTime: 0,
+    tradesThisHour: [],
+    positionOpenTimes: new Map(),
   };
   private checkInterval: NodeJS.Timeout | null = null;
 
@@ -138,6 +146,10 @@ class TradingBot {
       executionMode: config.executionMode,
       totalTrades: 0,
       successfulTrades: 0,
+      // Reset frequency control tracking
+      lastTradeTime: 0,
+      tradesThisHour: [],
+      positionOpenTimes: new Map(),
     };
 
     // Validate algorithm rules before starting
@@ -345,6 +357,74 @@ class TradingBot {
     await this.stop();
   }
 
+  // Check if frequency controls allow a new trade
+  private checkFrequencyControls(riskManagement: RiskManagement, positions: Position[], action: string): { allowed: boolean; reason?: string } {
+    const now = Date.now();
+    
+    // 1. Trade Cooldown check (for new entries only)
+    if ((action === "buy" || action === "sell") && riskManagement.tradeCooldownSeconds) {
+      const cooldownMs = riskManagement.tradeCooldownSeconds * 1000;
+      const timeSinceLastTrade = now - this.state.lastTradeTime;
+      if (this.state.lastTradeTime > 0 && timeSinceLastTrade < cooldownMs) {
+        const remainingSeconds = Math.ceil((cooldownMs - timeSinceLastTrade) / 1000);
+        return { allowed: false, reason: `Trade cooldown: ${remainingSeconds}s remaining` };
+      }
+    }
+    
+    // 2. Max Trades Per Hour check
+    if (riskManagement.maxTradesPerHour) {
+      // Clean up old trades (older than 1 hour)
+      const oneHourAgo = now - 60 * 60 * 1000;
+      this.state.tradesThisHour = this.state.tradesThisHour.filter(t => t > oneHourAgo);
+      
+      if (this.state.tradesThisHour.length >= riskManagement.maxTradesPerHour) {
+        return { allowed: false, reason: `Max trades/hour reached: ${this.state.tradesThisHour.length}/${riskManagement.maxTradesPerHour}` };
+      }
+    }
+    
+    // 3. Max Concurrent Positions check (for new entries only)
+    if ((action === "buy" || action === "sell") && riskManagement.maxConcurrentPositions) {
+      if (positions.length >= riskManagement.maxConcurrentPositions) {
+        return { allowed: false, reason: `Max concurrent positions: ${positions.length}/${riskManagement.maxConcurrentPositions}` };
+      }
+    }
+    
+    // 4. Min Hold Time check (for close actions only)
+    if (action === "close" && riskManagement.minHoldTimeSeconds && positions.length > 0) {
+      const minHoldMs = riskManagement.minHoldTimeSeconds * 1000;
+      // Check if any position was opened too recently
+      for (const pos of positions) {
+        const openTime = this.state.positionOpenTimes.get(pos.id);
+        if (openTime) {
+          const holdTime = now - openTime;
+          if (holdTime < minHoldMs) {
+            const remainingSeconds = Math.ceil((minHoldMs - holdTime) / 1000);
+            return { allowed: false, reason: `Min hold time: ${remainingSeconds}s remaining for ${pos.symbol}` };
+          }
+        }
+      }
+    }
+    
+    return { allowed: true };
+  }
+
+  // Track that a trade was executed
+  private recordTradeExecution(positionId?: string): void {
+    const now = Date.now();
+    this.state.lastTradeTime = now;
+    this.state.tradesThisHour.push(now);
+    
+    // Track position open time if this is a new position
+    if (positionId) {
+      this.state.positionOpenTimes.set(positionId, now);
+    }
+  }
+
+  // Remove position from tracking when closed
+  private recordPositionClose(positionId: string): void {
+    this.state.positionOpenTimes.delete(positionId);
+  }
+
   private async executeTradeCheck(): Promise<void> {
     if (!this.config || this.state.isPaused) return;
 
@@ -382,6 +462,14 @@ class TradingBot {
       );
 
       if (decision.action !== "hold") {
+        // Check frequency controls before executing
+        const frequencyCheck = this.checkFrequencyControls(algorithm.riskManagement, positions, decision.action);
+        if (!frequencyCheck.allowed) {
+          // Log but don't execute
+          console.log(`[FrequencyControl] Blocked: ${frequencyCheck.reason}`);
+          return;
+        }
+        
         await this.executeDecision(decision, ticker, exchangeInfo);
       }
 
@@ -1159,8 +1247,13 @@ class TradingBot {
         if (order.status === "filled" || executionMode === "real") {
           this.state.successfulTrades++;
           
+          const positionId = randomUUID();
+          
+          // Record trade execution for frequency control
+          this.recordTradeExecution(positionId);
+          
           const position: Position = {
-            id: randomUUID(),
+            id: positionId,
             symbol,
             side: decision.action === "buy" ? "long" : "short",
             entryPrice: order.price,
@@ -1255,6 +1348,10 @@ class TradingBot {
           // Clean up any associated stop orders
           await storage.deleteStopOrdersByPosition(exchange, position.id);
 
+          // Record position close for frequency control
+          this.recordPositionClose(position.id);
+          this.recordTradeExecution();
+          
           this.state.successfulTrades++;
 
           await storage.addTradeLog({
