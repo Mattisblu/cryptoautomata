@@ -204,6 +204,21 @@ export const liveOrders = pgTable("live_orders", {
   timestamp: timestamp("timestamp").notNull().defaultNow(),
 });
 
+// Live Stop Orders - persists stop loss/take profit/trailing stop orders across restarts
+export const liveStopOrders = pgTable("live_stop_orders", {
+  id: text("id").primaryKey(), // Stop order ID
+  exchange: text("exchange").notNull(),
+  positionId: text("position_id").notNull(),
+  type: text("type").notNull(), // "stop_loss", "take_profit", "trailing_stop"
+  triggerPrice: real("trigger_price").notNull(),
+  quantity: real("quantity").notNull(),
+  status: text("status").notNull().default("active"), // "active", "triggered", "cancelled"
+  highestPrice: real("highest_price"), // For trailing stop on long positions
+  lowestPrice: real("lowest_price"), // For trailing stop on short positions
+  trailingDistance: real("trailing_distance"), // Percentage for trailing stop
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Relations
 export const tradesRelations = relations(trades, ({ }) => ({}));
 export const dailySummariesRelations = relations(dailySummaries, ({ }) => ({}));
@@ -211,6 +226,7 @@ export const algorithmPerformanceRelations = relations(algorithmPerformance, ({ 
 export const algorithmVersionsRelations = relations(algorithmVersions, ({ }) => ({}));
 export const livePositionsRelations = relations(livePositions, ({ }) => ({}));
 export const liveOrdersRelations = relations(liveOrders, ({ }) => ({}));
+export const liveStopOrdersRelations = relations(liveStopOrders, ({ }) => ({}));
 export const algorithmsRelations = relations(algorithms, ({ }) => ({}));
 export const abTestsRelations = relations(abTests, ({ }) => ({}));
 export const notificationsRelations = relations(notifications, ({ }) => ({}));

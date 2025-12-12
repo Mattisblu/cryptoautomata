@@ -30,7 +30,7 @@ import type {
   InsertRunningStrategy,
   RunningStrategyStatus,
 } from "@shared/schema";
-import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies, algorithms, livePositions, liveOrders } from "@shared/schema";
+import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies, algorithms, livePositions, liveOrders, liveStopOrders } from "@shared/schema";
 import type { PositionSide, OrderType, OrderSide, OrderStatus } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
@@ -170,7 +170,7 @@ export class MemStorage implements IStorage {
   private tickers: Map<string, Ticker> = new Map();
   private klines: Map<string, Kline[]> = new Map();
   // Note: positions and orders are now stored in the database for persistence
-  private stopOrders: Map<Exchange, StopOrder[]> = new Map();
+  // Stop orders are now in database (liveStopOrders table) - no longer using in-memory map
   // Note: algorithms are now stored in the database, not in-memory
   private chatMessages: ChatMessage[] = [];
   private tradeCycleState: TradeCycleState | null = null;
@@ -429,39 +429,74 @@ export class MemStorage implements IStorage {
       .where(eq(liveOrders.id, order.id));
   }
 
-  // Stop Orders (SL/TP/Trailing)
+  // Stop Orders (SL/TP/Trailing) - Database-backed for persistence
   async getStopOrders(exchange: Exchange): Promise<StopOrder[]> {
-    return this.stopOrders.get(exchange) || [];
+    const rows = await db.select().from(liveStopOrders).where(eq(liveStopOrders.exchange, exchange));
+    return rows.map(r => ({
+      id: r.id,
+      positionId: r.positionId,
+      type: r.type as "stop_loss" | "take_profit" | "trailing_stop",
+      triggerPrice: r.triggerPrice,
+      quantity: r.quantity,
+      status: r.status as "active" | "triggered" | "cancelled",
+      highestPrice: r.highestPrice ?? undefined,
+      lowestPrice: r.lowestPrice ?? undefined,
+      trailingDistance: r.trailingDistance ?? undefined,
+      createdAt: r.createdAt.getTime(),
+    }));
   }
 
   async getStopOrdersByPosition(exchange: Exchange, positionId: string): Promise<StopOrder[]> {
-    const stopOrders = this.stopOrders.get(exchange) || [];
-    return stopOrders.filter(so => so.positionId === positionId);
+    const rows = await db.select().from(liveStopOrders)
+      .where(and(eq(liveStopOrders.exchange, exchange), eq(liveStopOrders.positionId, positionId)));
+    return rows.map(r => ({
+      id: r.id,
+      positionId: r.positionId,
+      type: r.type as "stop_loss" | "take_profit" | "trailing_stop",
+      triggerPrice: r.triggerPrice,
+      quantity: r.quantity,
+      status: r.status as "active" | "triggered" | "cancelled",
+      highestPrice: r.highestPrice ?? undefined,
+      lowestPrice: r.lowestPrice ?? undefined,
+      trailingDistance: r.trailingDistance ?? undefined,
+      createdAt: r.createdAt.getTime(),
+    }));
   }
 
   async addStopOrder(exchange: Exchange, stopOrder: StopOrder): Promise<void> {
-    const stopOrders = this.stopOrders.get(exchange) || [];
-    stopOrders.push(stopOrder);
-    this.stopOrders.set(exchange, stopOrders);
+    await db.insert(liveStopOrders).values({
+      id: stopOrder.id,
+      exchange: exchange,
+      positionId: stopOrder.positionId,
+      type: stopOrder.type,
+      triggerPrice: stopOrder.triggerPrice,
+      quantity: stopOrder.quantity,
+      status: stopOrder.status,
+      highestPrice: stopOrder.highestPrice ?? null,
+      lowestPrice: stopOrder.lowestPrice ?? null,
+      trailingDistance: stopOrder.trailingDistance ?? null,
+    });
   }
 
   async updateStopOrder(exchange: Exchange, stopOrder: StopOrder): Promise<void> {
-    const stopOrders = this.stopOrders.get(exchange) || [];
-    const index = stopOrders.findIndex(so => so.id === stopOrder.id);
-    if (index >= 0) {
-      stopOrders[index] = stopOrder;
-      this.stopOrders.set(exchange, stopOrders);
-    }
+    await db.update(liveStopOrders)
+      .set({
+        triggerPrice: stopOrder.triggerPrice,
+        quantity: stopOrder.quantity,
+        status: stopOrder.status,
+        highestPrice: stopOrder.highestPrice ?? null,
+        lowestPrice: stopOrder.lowestPrice ?? null,
+        trailingDistance: stopOrder.trailingDistance ?? null,
+      })
+      .where(eq(liveStopOrders.id, stopOrder.id));
   }
 
   async deleteStopOrder(exchange: Exchange, id: string): Promise<void> {
-    const stopOrders = this.stopOrders.get(exchange) || [];
-    this.stopOrders.set(exchange, stopOrders.filter(so => so.id !== id));
+    await db.delete(liveStopOrders).where(eq(liveStopOrders.id, id));
   }
 
   async deleteStopOrdersByPosition(exchange: Exchange, positionId: string): Promise<void> {
-    const stopOrders = this.stopOrders.get(exchange) || [];
-    this.stopOrders.set(exchange, stopOrders.filter(so => so.positionId !== positionId));
+    await db.delete(liveStopOrders).where(eq(liveStopOrders.positionId, positionId));
   }
 
   // Risk Parameters
