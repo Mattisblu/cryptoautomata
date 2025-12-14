@@ -15,6 +15,14 @@ import { notificationService } from "./notificationService";
 import { strategyOptimizer } from "./strategyOptimizer";
 import { randomUUID } from "crypto";
 
+// Type for compound condition AST nodes
+type ConditionNodeType = 'LEAF' | 'AND' | 'OR' | 'NOT' | 'XOR' | 'IF_THEN';
+interface ConditionNode {
+  type: ConditionNodeType;
+  children?: ConditionNode[];
+  condition?: string;
+}
+
 interface BotInstance {
   sessionId: string;
   exchange: Exchange;
@@ -516,6 +524,213 @@ class StrategyOrchestrator {
     return { matched: true, triggered, debugInfo };
   }
 
+  // ============================================================
+  // COMPOUND CONDITION PARSER
+  // Supports: AND, OR, NOT, XOR, IF-THEN, and parentheses for nesting
+  // ============================================================
+
+  private tokenizeCondition(condition: string): string[] {
+    let normalized = condition
+      .replace(/\(/g, ' ( ')
+      .replace(/\)/g, ' ) ')
+      .replace(/\bAND\b/gi, ' AND ')
+      .replace(/\bOR\b/gi, ' OR ')
+      .replace(/\bNOT\b/gi, ' NOT ')
+      .replace(/\bXOR\b/gi, ' XOR ')
+      .replace(/\bIF\b/gi, ' IF ')
+      .replace(/\bTHEN\b/gi, ' THEN ');
+    return normalized.split(/\s+/).filter(t => t.length > 0);
+  }
+
+  private isCompoundCondition(condition: string): boolean {
+    const upper = condition.toUpperCase();
+    return upper.includes(' AND ') || upper.includes(' OR ') || 
+           upper.includes(' NOT ') || upper.includes(' XOR ') ||
+           upper.includes('(') || (upper.includes(' IF ') && upper.includes(' THEN '));
+  }
+
+  private parseCompoundCondition(condition: string): ConditionNode {
+    const tokens = this.tokenizeCondition(condition);
+    const { node } = this.parseExpression(tokens, 0);
+    return node;
+  }
+
+  private parseExpression(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    // Check for IF-THEN at the START of the expression
+    if (pos < tokens.length && tokens[pos]?.toUpperCase() === 'IF') {
+      const ifResult = this.parseOr(tokens, pos + 1);
+      if (ifResult.nextPos < tokens.length && tokens[ifResult.nextPos]?.toUpperCase() === 'THEN') {
+        const thenResult = this.parseOr(tokens, ifResult.nextPos + 1);
+        return { node: { type: 'IF_THEN', children: [ifResult.node, thenResult.node] }, nextPos: thenResult.nextPos };
+      }
+      // Fallback if THEN not found - treat as regular expression
+      return ifResult;
+    }
+    return this.parseOr(tokens, pos);
+  }
+
+  private parseOr(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    let { node: left, nextPos } = this.parseXor(tokens, pos);
+    while (nextPos < tokens.length && tokens[nextPos]?.toUpperCase() === 'OR') {
+      const { node: right, nextPos: newPos } = this.parseXor(tokens, nextPos + 1);
+      left = { type: 'OR', children: [left, right] };
+      nextPos = newPos;
+    }
+    return { node: left, nextPos };
+  }
+
+  private parseXor(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    let { node: left, nextPos } = this.parseAnd(tokens, pos);
+    while (nextPos < tokens.length && tokens[nextPos]?.toUpperCase() === 'XOR') {
+      const { node: right, nextPos: newPos } = this.parseAnd(tokens, nextPos + 1);
+      left = { type: 'XOR', children: [left, right] };
+      nextPos = newPos;
+    }
+    return { node: left, nextPos };
+  }
+
+  private parseAnd(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    let { node: left, nextPos } = this.parseNot(tokens, pos);
+    while (nextPos < tokens.length && tokens[nextPos]?.toUpperCase() === 'AND') {
+      const { node: right, nextPos: newPos } = this.parseNot(tokens, nextPos + 1);
+      left = { type: 'AND', children: [left, right] };
+      nextPos = newPos;
+    }
+    return { node: left, nextPos };
+  }
+
+  private parseNot(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    if (pos < tokens.length && tokens[pos]?.toUpperCase() === 'NOT') {
+      const { node: child, nextPos } = this.parseNot(tokens, pos + 1);
+      return { node: { type: 'NOT', children: [child] }, nextPos };
+    }
+    return this.parsePrimary(tokens, pos);
+  }
+
+  private parsePrimary(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    if (pos >= tokens.length) {
+      return { node: { type: 'LEAF', condition: '' }, nextPos: pos };
+    }
+    if (tokens[pos] === '(') {
+      const { node, nextPos } = this.parseExpression(tokens, pos + 1);
+      const finalPos = tokens[nextPos] === ')' ? nextPos + 1 : nextPos;
+      return { node, nextPos: finalPos };
+    }
+    const operators = ['AND', 'OR', 'NOT', 'XOR', 'IF', 'THEN', '(', ')'];
+    const conditionTokens: string[] = [];
+    let currentPos = pos;
+    while (currentPos < tokens.length) {
+      const token = tokens[currentPos];
+      if (operators.includes(token.toUpperCase()) || token === '(' || token === ')') break;
+      conditionTokens.push(token);
+      currentPos++;
+    }
+    return { node: { type: 'LEAF', condition: conditionTokens.join(' ') }, nextPos: currentPos };
+  }
+
+  private evaluateConditionNode(node: ConditionNode, evaluatePrimitive: (condition: string) => boolean): boolean {
+    switch (node.type) {
+      case 'LEAF':
+        return evaluatePrimitive(node.condition || '');
+      case 'AND':
+        return node.children?.every(child => this.evaluateConditionNode(child, evaluatePrimitive)) ?? false;
+      case 'OR':
+        return node.children?.some(child => this.evaluateConditionNode(child, evaluatePrimitive)) ?? false;
+      case 'NOT':
+        return !this.evaluateConditionNode(node.children![0], evaluatePrimitive);
+      case 'XOR': {
+        const results = node.children?.map(child => this.evaluateConditionNode(child, evaluatePrimitive)) ?? [];
+        return results.filter(r => r).length === 1;
+      }
+      case 'IF_THEN': {
+        const [ifNode, thenNode] = node.children!;
+        const ifResult = this.evaluateConditionNode(ifNode, evaluatePrimitive);
+        if (!ifResult) return true;
+        return this.evaluateConditionNode(thenNode, evaluatePrimitive);
+      }
+      default:
+        return false;
+    }
+  }
+
+  // Context object for primitive evaluator
+  private evaluationContext: {
+    currentPrice: number;
+    priceChange: number;
+    hasPosition: boolean;
+    sma20: number;
+    sma50: number;
+    macd: ReturnType<StrategyOrchestrator["calculateMACD"]>;
+    volume: ReturnType<StrategyOrchestrator["calculateVolumeAnalysis"]>;
+    klines: { close: number; volume?: number }[];
+    positions: any[];
+  } | null = null;
+
+  // Evaluate a single primitive condition
+  private evaluatePrimitiveCondition(conditionText: string): boolean {
+    if (!this.evaluationContext) return false;
+    
+    const { currentPrice, priceChange, hasPosition, sma20, sma50, macd, volume, klines, positions } = this.evaluationContext;
+    const condition = conditionText.toLowerCase().trim();
+    
+    if (!condition) return false;
+
+    // --- NUMERIC PRICE CONDITIONS ---
+    const numericResult = this.evaluateNumericCondition(conditionText, currentPrice);
+    if (numericResult.matched) return numericResult.triggered;
+
+    // --- SMA Conditions ---
+    if (condition.includes("price above sma") && currentPrice > sma20) return true;
+    if (condition.includes("price below sma") && currentPrice < sma20) return true;
+    if ((condition.includes("sma crossover") || condition.includes("bullish crossover")) && sma20 > sma50) return true;
+    if (condition.includes("bearish crossover") && sma20 < sma50) return true;
+
+    // --- MACD Conditions ---
+    if ((condition.includes("macd bullish crossover") || condition.includes("macd cross above")) && macd.crossover === "bullish_crossover") return true;
+    if ((condition.includes("macd bearish crossover") || condition.includes("macd cross below")) && macd.crossover === "bearish_crossover") return true;
+    if ((condition.includes("macd bullish") || condition.includes("macd positive")) && macd.trend === "bullish") return true;
+    if ((condition.includes("macd bearish") || condition.includes("macd negative")) && macd.trend === "bearish") return true;
+    if ((condition.includes("macd histogram positive") || condition.includes("histogram above zero")) && macd.histogram > 0) return true;
+    if ((condition.includes("macd histogram negative") || condition.includes("histogram below zero")) && macd.histogram < 0) return true;
+    if (condition.includes("macd above zero") && macd.macdAboveZero) return true;
+    if (condition.includes("macd below zero") && macd.macdBelowZero) return true;
+    if (condition.includes("macd above signal") && macd.macdLine > macd.signalLine) return true;
+    if (condition.includes("macd below signal") && macd.macdLine < macd.signalLine) return true;
+    if ((condition.includes("histogram swelling") || condition.includes("momentum increasing") || condition.includes("bars increasing")) && macd.histogramMomentum === "swelling") return true;
+    if ((condition.includes("histogram shrinking") || condition.includes("momentum decreasing") || condition.includes("bars decreasing")) && macd.histogramMomentum === "shrinking") return true;
+    if ((condition.includes("bullish divergence") || condition.includes("positive divergence")) && macd.divergence === "bullish_divergence") return true;
+    if ((condition.includes("bearish divergence") || condition.includes("negative divergence")) && macd.divergence === "bearish_divergence") return true;
+    if ((condition.includes("divergence detected") || condition.includes("any divergence")) && macd.divergence !== "none") return true;
+
+    // --- Volume Conditions ---
+    if ((condition.includes("volume spike") || condition.includes("high volume spike")) && volume.isVolumeSpike) return true;
+    if ((condition.includes("high volume") || condition.includes("above average volume")) && volume.isHighVolume) return true;
+    if ((condition.includes("low volume") || condition.includes("below average volume")) && volume.isLowVolume) return true;
+    if ((condition.includes("volume increasing") || condition.includes("rising volume")) && volume.volumeTrend === "increasing") return true;
+    if ((condition.includes("volume decreasing") || condition.includes("falling volume")) && volume.volumeTrend === "decreasing") return true;
+
+    // --- Combined Conditions ---
+    if ((condition.includes("macd bullish with volume") || condition.includes("bullish with volume confirmation")) && macd.trend === "bullish" && volume.isHighVolume) return true;
+    if ((condition.includes("macd bearish with volume") || condition.includes("bearish with volume confirmation")) && macd.trend === "bearish" && volume.isHighVolume) return true;
+    if (condition.includes("macd crossover with volume") && macd.crossover !== "none" && volume.isHighVolume) return true;
+    if ((condition.includes("bullish breakout") || condition.includes("breakout with volume")) && macd.trend === "bullish" && volume.isVolumeSpike && currentPrice > sma20) return true;
+    if (condition.includes("bearish breakdown") && macd.trend === "bearish" && volume.isVolumeSpike && currentPrice < sma20) return true;
+
+    // --- Price/Market Conditions ---
+    if (condition.includes("oversold") && priceChange < -2) return true;
+    if (condition.includes("overbought") && priceChange > 2) return true;
+    if (condition.includes("no position") && !hasPosition) return true;
+    if (condition.includes("has position") && hasPosition) return true;
+
+    // --- Immediate Entry Conditions ---
+    if ((condition.includes("immediate") || condition.includes("enter now") || condition.includes("market entry") ||
+         condition.includes("on start") || condition.includes("always enter") || condition.includes("entry signal")) && !hasPosition) {
+      return true;
+    }
+
+    return false;
+  }
+
   private async evaluateRules(
     rules: TradingAlgorithm["rules"],
     ticker: { lastPrice: number; priceChangePercent: number },
@@ -537,136 +752,37 @@ class StrategyOrchestrator {
     // Calculate volume analysis
     const volume = this.calculateVolumeAnalysis(klines);
 
+    // Set up evaluation context for primitive evaluator
+    this.evaluationContext = {
+      currentPrice,
+      priceChange,
+      hasPosition,
+      sma20,
+      sma50,
+      macd,
+      volume,
+      klines,
+      positions,
+    };
+
+    // Rule evaluation with support for compound conditions (AND, OR, NOT, XOR, IF-THEN)
     for (const rule of sortedRules) {
-      const condition = rule.condition.toLowerCase();
       let shouldTrigger = false;
       let triggerDebugInfo = "";
-      
-      // Debug: Log each rule being evaluated
-      console.log(`[StrategyOrchestrator] Evaluating rule: "${rule.condition}" (action: ${rule.action}, priority: ${rule.priority})`);
 
-      // --- NUMERIC PRICE CONDITIONS (highest priority) ---
-      const numericResult = this.evaluateNumericCondition(rule.condition, currentPrice);
-      if (numericResult.matched) {
-        shouldTrigger = numericResult.triggered;
-        triggerDebugInfo = numericResult.debugInfo;
-        console.log(`[StrategyOrchestrator] Rule "${rule.condition}": ${triggerDebugInfo}`);
-      }
-      // --- SMA Conditions ---
-      else if (condition.includes("price above sma") && currentPrice > sma20) {
-        shouldTrigger = true;
-      } else if (condition.includes("price below sma") && currentPrice < sma20) {
-        shouldTrigger = true;
-      } else if (condition.includes("sma crossover") || condition.includes("bullish crossover")) {
-        if (sma20 > sma50) shouldTrigger = true;
-      } else if (condition.includes("bearish crossover")) {
-        if (sma20 < sma50) shouldTrigger = true;
-      }
-
-      // --- MACD Conditions ---
-      // Buy Signal: MACD line crosses above Signal Line (bullish momentum)
-      else if (condition.includes("macd bullish crossover") || condition.includes("macd cross above")) {
-        if (macd.crossover === "bullish_crossover") shouldTrigger = true;
-      }
-      // Sell Signal: MACD line crosses below Signal Line (bearish momentum)
-      else if (condition.includes("macd bearish crossover") || condition.includes("macd cross below")) {
-        if (macd.crossover === "bearish_crossover") shouldTrigger = true;
-      }
-      // MACD trend conditions
-      else if (condition.includes("macd bullish") || condition.includes("macd positive")) {
-        if (macd.trend === "bullish") shouldTrigger = true;
-      } else if (condition.includes("macd bearish") || condition.includes("macd negative")) {
-        if (macd.trend === "bearish") shouldTrigger = true;
-      }
-      // Histogram conditions (momentum strength)
-      else if (condition.includes("macd histogram positive") || condition.includes("histogram above zero")) {
-        if (macd.histogram > 0) shouldTrigger = true;
-      } else if (condition.includes("macd histogram negative") || condition.includes("histogram below zero")) {
-        if (macd.histogram < 0) shouldTrigger = true;
-      }
-      // Zero line conditions
-      else if (condition.includes("macd above zero")) {
-        if (macd.macdLine > 0) shouldTrigger = true;
-      } else if (condition.includes("macd below zero")) {
-        if (macd.macdLine < 0) shouldTrigger = true;
-      }
-      // MACD vs Signal line
-      else if (condition.includes("macd above signal")) {
-        if (macd.macdLine > macd.signalLine) shouldTrigger = true;
-      } else if (condition.includes("macd below signal")) {
-        if (macd.macdLine < macd.signalLine) shouldTrigger = true;
-      }
-      // Histogram momentum conditions (point 3: swelling/shrinking bars)
-      else if (condition.includes("histogram swelling") || condition.includes("momentum increasing") || condition.includes("bars increasing")) {
-        if (macd.histogramMomentum === "swelling") shouldTrigger = true;
-      } else if (condition.includes("histogram shrinking") || condition.includes("momentum decreasing") || condition.includes("bars decreasing")) {
-        if (macd.histogramMomentum === "shrinking") shouldTrigger = true;
-      }
-      // Divergence conditions (point 8: price vs MACD disagreement)
-      else if (condition.includes("bullish divergence") || condition.includes("positive divergence")) {
-        if (macd.divergence === "bullish_divergence") shouldTrigger = true;
-      } else if (condition.includes("bearish divergence") || condition.includes("negative divergence")) {
-        if (macd.divergence === "bearish_divergence") shouldTrigger = true;
-      } else if (condition.includes("divergence detected") || condition.includes("any divergence")) {
-        if (macd.divergence !== "none") shouldTrigger = true;
-      }
-
-      // --- Volume Conditions ---
-      else if (condition.includes("volume spike") || condition.includes("high volume spike")) {
-        if (volume.isVolumeSpike) shouldTrigger = true;
-      } else if (condition.includes("high volume") || condition.includes("above average volume")) {
-        if (volume.isHighVolume) shouldTrigger = true;
-      } else if (condition.includes("low volume") || condition.includes("below average volume")) {
-        if (volume.isLowVolume) shouldTrigger = true;
-      } else if (condition.includes("volume increasing") || condition.includes("rising volume")) {
-        if (volume.volumeTrend === "increasing") shouldTrigger = true;
-      } else if (condition.includes("volume decreasing") || condition.includes("falling volume")) {
-        if (volume.volumeTrend === "decreasing") shouldTrigger = true;
-      }
-
-      // --- Combined Conditions (MACD + Volume confirmation) ---
-      else if (condition.includes("macd bullish with volume") || condition.includes("bullish with volume confirmation")) {
-        if (macd.trend === "bullish" && volume.isHighVolume) shouldTrigger = true;
-      } else if (condition.includes("macd bearish with volume") || condition.includes("bearish with volume confirmation")) {
-        if (macd.trend === "bearish" && volume.isHighVolume) shouldTrigger = true;
-      } else if (condition.includes("macd crossover with volume")) {
-        if (macd.crossover !== "none" && volume.isHighVolume) shouldTrigger = true;
-      } else if (condition.includes("bullish breakout") || condition.includes("breakout with volume")) {
-        if (macd.trend === "bullish" && volume.isVolumeSpike && currentPrice > sma20) {
-          shouldTrigger = true;
-        }
-      } else if (condition.includes("bearish breakdown")) {
-        if (macd.trend === "bearish" && volume.isVolumeSpike && currentPrice < sma20) {
-          shouldTrigger = true;
-        }
-      }
-
-      // --- Price/Market Conditions ---
-      else if (condition.includes("oversold") && priceChange < -2) {
-        shouldTrigger = true;
-      } else if (condition.includes("overbought") && priceChange > 2) {
-        shouldTrigger = true;
-      } else if (condition.includes("no position") && !hasPosition) {
-        shouldTrigger = true;
-      } else if (condition.includes("has position") && hasPosition) {
-        shouldTrigger = true;
-      }
-      // --- Immediate Entry Conditions (always trigger if no position) ---
-      else if (
-        (condition.includes("immediate") || 
-         condition.includes("enter now") || 
-         condition.includes("market entry") ||
-         condition.includes("on start") ||
-         condition.includes("always enter") ||
-         condition.includes("entry signal")) && 
-        !hasPosition
-      ) {
-        shouldTrigger = true;
-        console.log(`[StrategyOrchestrator] Immediate entry condition matched: "${rule.condition}"`);
+      // Check if this is a compound condition
+      if (this.isCompoundCondition(rule.condition)) {
+        const ast = this.parseCompoundCondition(rule.condition);
+        shouldTrigger = this.evaluateConditionNode(ast, (primitive) => this.evaluatePrimitiveCondition(primitive));
+        triggerDebugInfo = `Compound condition evaluated: ${shouldTrigger ? "TRUE" : "FALSE"}`;
+        console.log(`[StrategyOrchestrator] Compound rule "${rule.condition}": ${triggerDebugInfo}`);
+      } else {
+        // Simple primitive condition
+        shouldTrigger = this.evaluatePrimitiveCondition(rule.condition);
       }
 
       if (shouldTrigger) {
-        // Build detailed reason with indicator values
+        const condition = rule.condition.toLowerCase();
         let reason = `Rule triggered: ${rule.condition}`;
         
         if (triggerDebugInfo) {
@@ -674,22 +790,18 @@ class StrategyOrchestrator {
         }
         if (condition.includes("macd") || condition.includes("histogram") || condition.includes("divergence") || condition.includes("momentum")) {
           reason += ` | MACD: ${macd.macdLine.toFixed(4)}, Signal: ${macd.signalLine.toFixed(4)}, Histogram: ${macd.histogram.toFixed(4)}, Trend: ${macd.trend}`;
-          reason += `, HistMomentum: ${macd.histogramMomentum}, Divergence: ${macd.divergence}`;
-          reason += `, AboveZero: ${macd.macdAboveZero}, BelowZero: ${macd.macdBelowZero}`;
         }
         if (condition.includes("volume")) {
           reason += ` | Volume: ${volume.volumeRatio.toFixed(2)}x avg, Trend: ${volume.volumeTrend}`;
         }
         
         console.log(`[StrategyOrchestrator] TRIGGER FIRED: action=${rule.action}, reason=${reason}`);
-        return {
-          action: rule.action,
-          rule,
-          reason,
-        };
+        this.evaluationContext = null;
+        return { action: rule.action, rule, reason };
       }
     }
 
+    this.evaluationContext = null;
     return { action: "hold", reason: "No rules triggered" };
   }
 

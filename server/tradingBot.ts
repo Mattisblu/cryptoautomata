@@ -755,15 +755,17 @@ class TradingBot {
   }
 
   private parseExpression(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
-    let { node: left, nextPos } = this.parseOr(tokens, pos);
-    if (nextPos < tokens.length && tokens[nextPos]?.toUpperCase() === 'IF') {
-      const ifResult = this.parseOr(tokens, nextPos + 1);
+    // Check for IF-THEN at the START of the expression
+    if (pos < tokens.length && tokens[pos]?.toUpperCase() === 'IF') {
+      const ifResult = this.parseOr(tokens, pos + 1);
       if (ifResult.nextPos < tokens.length && tokens[ifResult.nextPos]?.toUpperCase() === 'THEN') {
         const thenResult = this.parseOr(tokens, ifResult.nextPos + 1);
         return { node: { type: 'IF_THEN', children: [ifResult.node, thenResult.node] }, nextPos: thenResult.nextPos };
       }
+      // Fallback if THEN not found - treat as regular expression
+      return ifResult;
     }
-    return { node: left, nextPos };
+    return this.parseOr(tokens, pos);
   }
 
   private parseOr(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
@@ -903,6 +905,174 @@ class TradingBot {
     return { matched: true, triggered, debugInfo };
   }
 
+  // Context object passed to primitive evaluator to avoid repeated calculations
+  private evaluationContext: {
+    currentPrice: number;
+    priceChange: number;
+    hasPosition: boolean;
+    sma20: number;
+    sma50: number;
+    macd: ReturnType<TradingBot["calculateMACD"]>;
+    volume: ReturnType<TradingBot["calculateVolumeAnalysis"]>;
+    klines: Kline[];
+    positions: Position[];
+  } | null = null;
+
+  // Evaluate a single primitive condition (non-compound)
+  // Returns true if the condition is met
+  private evaluatePrimitiveCondition(conditionText: string): boolean {
+    if (!this.evaluationContext) return false;
+    
+    const { currentPrice, priceChange, hasPosition, sma20, sma50, macd, volume, klines, positions } = this.evaluationContext;
+    const condition = conditionText.toLowerCase().trim();
+    
+    // Empty condition
+    if (!condition) return false;
+
+    // --- NUMERIC PRICE CONDITIONS (highest priority) ---
+    const numericResult = this.evaluateNumericCondition(conditionText, currentPrice);
+    if (numericResult.matched) {
+      return numericResult.triggered;
+    }
+
+    // --- SMA Conditions ---
+    if (condition.includes("price above sma") && currentPrice > sma20) return true;
+    if (condition.includes("price below sma") && currentPrice < sma20) return true;
+    if ((condition.includes("sma crossover") || condition.includes("bullish crossover")) && sma20 > sma50) return true;
+    if (condition.includes("bearish crossover") && sma20 < sma50) return true;
+
+    // --- MACD Conditions ---
+    if ((condition.includes("macd bullish crossover") || condition.includes("macd cross above")) && macd.crossover === "bullish_crossover") return true;
+    if ((condition.includes("macd bearish crossover") || condition.includes("macd cross below")) && macd.crossover === "bearish_crossover") return true;
+    if ((condition.includes("macd bullish") || condition.includes("macd positive")) && macd.trend === "bullish") return true;
+    if ((condition.includes("macd bearish") || condition.includes("macd negative")) && macd.trend === "bearish") return true;
+    if ((condition.includes("macd histogram positive") || condition.includes("histogram above zero")) && macd.histogram > 0) return true;
+    if ((condition.includes("macd histogram negative") || condition.includes("histogram below zero")) && macd.histogram < 0) return true;
+    if (condition.includes("macd above signal") && macd.macdLine > macd.signalLine) return true;
+    if (condition.includes("macd below signal") && macd.macdLine < macd.signalLine) return true;
+
+    // --- Volume Conditions ---
+    if ((condition.includes("volume spike") || condition.includes("high volume spike")) && volume.isVolumeSpike) return true;
+    if ((condition.includes("high volume") || condition.includes("above average volume")) && volume.isHighVolume) return true;
+    if ((condition.includes("low volume") || condition.includes("below average volume")) && volume.isLowVolume) return true;
+    if ((condition.includes("volume increasing") || condition.includes("rising volume")) && volume.volumeTrend === "increasing") return true;
+    if ((condition.includes("volume decreasing") || condition.includes("falling volume")) && volume.volumeTrend === "decreasing") return true;
+
+    // --- Combined Conditions (MACD + Volume confirmation) ---
+    if ((condition.includes("macd bullish with volume") || condition.includes("bullish with volume confirmation")) && macd.trend === "bullish" && volume.isHighVolume) return true;
+    if ((condition.includes("macd bearish with volume") || condition.includes("bearish with volume confirmation")) && macd.trend === "bearish" && volume.isHighVolume) return true;
+    if (condition.includes("macd crossover with volume") && macd.crossover !== "none" && volume.isHighVolume) return true;
+    if ((condition.includes("bullish breakout") || condition.includes("breakout with volume")) && macd.trend === "bullish" && volume.isVolumeSpike && currentPrice > sma20) return true;
+    if (condition.includes("bearish breakdown") && macd.trend === "bearish" && volume.isVolumeSpike && currentPrice < sma20) return true;
+
+    // --- Simple Trend Conditions ---
+    if (condition.includes("uptrend") || condition.includes("upward trend") || 
+        condition.includes("trending up") || condition.includes("bullish trend") ||
+        condition.includes("price rising") || condition.includes("price going up")) {
+      if (klines.length >= 2) {
+        const lastCandle = klines[klines.length - 1];
+        const prevCandle = klines[klines.length - 2];
+        if (lastCandle.close > lastCandle.open && currentPrice > prevCandle.close) return true;
+      }
+    }
+    if (condition.includes("downtrend") || condition.includes("downward trend") || 
+        condition.includes("trending down") || condition.includes("bearish trend") ||
+        condition.includes("price falling") || condition.includes("price going down")) {
+      if (klines.length >= 2) {
+        const lastCandle = klines[klines.length - 1];
+        const prevCandle = klines[klines.length - 2];
+        if (lastCandle.close < lastCandle.open && currentPrice < prevCandle.close) return true;
+      }
+    }
+
+    // --- Green/Red Candle Conditions ---
+    if (condition.includes("green candle") || condition.includes("bullish candle") || 
+        condition.includes("candle closes above") || condition.includes("close above open") ||
+        condition.includes("closes above its open")) {
+      if (klines.length >= 1) {
+        const lastCandle = klines[klines.length - 1];
+        if (lastCandle.close > lastCandle.open) return true;
+      }
+    }
+    if (condition.includes("red candle") || condition.includes("bearish candle") || 
+        condition.includes("candle closes below") || condition.includes("close below open") ||
+        condition.includes("closes below its open")) {
+      if (klines.length >= 1) {
+        const lastCandle = klines[klines.length - 1];
+        if (lastCandle.close < lastCandle.open) return true;
+      }
+    }
+
+    // --- Price vs Previous Close Conditions ---
+    if (condition.includes("above previous close") || condition.includes("price above prev") ||
+        condition.includes("ticker above previous") || condition.includes("above the previous close")) {
+      if (klines.length >= 2 && currentPrice > klines[klines.length - 2].close) return true;
+    }
+    if (condition.includes("below previous close") || condition.includes("price below prev") ||
+        condition.includes("ticker below previous") || condition.includes("below the previous close")) {
+      if (klines.length >= 2 && currentPrice < klines[klines.length - 2].close) return true;
+    }
+
+    // --- Positive/Negative Price Change Conditions ---
+    if ((condition.includes("positive change") || condition.includes("price change positive") ||
+         condition.includes("price is up") || condition.includes("gaining")) && priceChange > 0) return true;
+    if ((condition.includes("negative change") || condition.includes("price change negative") ||
+         condition.includes("price is down") || condition.includes("losing")) && priceChange < 0) return true;
+
+    // --- Price/Market Conditions ---
+    if (condition.includes("oversold") && priceChange < -2) return true;
+    if (condition.includes("overbought") && priceChange > 2) return true;
+    if (condition.includes("no position") && !hasPosition) return true;
+    if (condition.includes("has position") && hasPosition) return true;
+
+    // --- Immediate Entry Conditions (always trigger if no position) ---
+    if ((condition.includes("immediate") || 
+         condition.includes("enter now") || 
+         condition.includes("market entry") ||
+         condition.includes("on start") ||
+         condition.includes("always enter") ||
+         condition.includes("entry signal")) && !hasPosition) {
+      return true;
+    }
+
+    // --- Take Profit / Stop Loss based on percentage from entry ---
+    if (hasPosition && (condition.includes("take profit") || condition.includes("take-profit") || 
+         condition.includes("stop loss") || condition.includes("stop-loss") ||
+         condition.includes("price decreases") || condition.includes("price increases"))) {
+      const percentMatch = condition.match(/(\d+\.?\d*)\s*%/);
+      if (percentMatch) {
+        const targetPercent = parseFloat(percentMatch[1]);
+        const position = positions[0];
+        if (position && position.entryPrice) {
+          const entryPrice = position.entryPrice;
+          const pnlPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+          const isLong = position.side === "long";
+          const effectivePnl = isLong ? pnlPercent : -pnlPercent;
+          
+          if (condition.includes("take profit") || condition.includes("take-profit") || 
+              (condition.includes("decreases") && !isLong) || (condition.includes("increases") && isLong)) {
+            if (effectivePnl >= targetPercent) return true;
+          } else if (condition.includes("stop loss") || condition.includes("stop-loss") ||
+                     (condition.includes("increases") && !isLong) || (condition.includes("decreases") && isLong)) {
+            if (effectivePnl <= -targetPercent) return true;
+          }
+        }
+      }
+    }
+
+    // --- Price level breakout/breakdown conditions ---
+    if (condition.includes("price breaks") || condition.includes("breaks below") || condition.includes("breaks above")) {
+      const priceMatch = condition.match(/(\d+\.?\d*)/);
+      if (priceMatch) {
+        const targetPrice = parseFloat(priceMatch[1]);
+        if (condition.includes("below") && currentPrice < targetPrice) return true;
+        if (condition.includes("above") && currentPrice > targetPrice) return true;
+      }
+    }
+
+    return false;
+  }
+
   private async evaluateRules(
     rules: TradingRule[],
     ticker: Ticker,
@@ -927,6 +1097,19 @@ class TradingBot {
     // Calculate volume analysis
     const volume = this.calculateVolumeAnalysis(klines);
 
+    // Set up evaluation context for primitive evaluator
+    this.evaluationContext = {
+      currentPrice,
+      priceChange,
+      hasPosition,
+      sma20,
+      sma50,
+      macd,
+      volume,
+      klines,
+      positions,
+    };
+
     // Log current indicator values for debugging
     console.log(`[TradingBot] === Trade Check ===`);
     console.log(`[TradingBot] Price: $${currentPrice.toFixed(4)} | Change: ${priceChange.toFixed(2)}%`);
@@ -935,263 +1118,34 @@ class TradingBot {
     console.log(`[TradingBot] SMA20: ${sma20.toFixed(4)} | SMA50: ${sma50.toFixed(4)} | Has Position: ${hasPosition}`);
     console.log(`[TradingBot] Evaluating ${sortedRules.length} rules...`);
 
-    // Rule evaluation with support for MACD, volume, and NUMERIC conditions
+    // Rule evaluation with support for compound conditions (AND, OR, NOT, XOR, IF-THEN)
     for (const rule of sortedRules) {
-      const condition = rule.condition.toLowerCase();
       let shouldTrigger = false;
       let triggerDebugInfo = "";
 
-      // --- NUMERIC PRICE CONDITIONS (highest priority) ---
-      // Parse direct price triggers like "price > 0.14", "price >= 100", etc.
-      const numericResult = this.evaluateNumericCondition(rule.condition, currentPrice);
-      if (numericResult.matched) {
-        shouldTrigger = numericResult.triggered;
-        triggerDebugInfo = numericResult.debugInfo;
-        console.log(`[TradingBot] Rule "${rule.condition}": ${triggerDebugInfo}`);
-      }
-      // --- SMA Conditions ---
-      else if (condition.includes("price above sma") && currentPrice > sma20) {
-        shouldTrigger = true;
-      } else if (condition.includes("price below sma") && currentPrice < sma20) {
-        shouldTrigger = true;
-      } else if (condition.includes("sma crossover") || condition.includes("bullish crossover")) {
-        if (sma20 > sma50) shouldTrigger = true;
-      } else if (condition.includes("bearish crossover")) {
-        if (sma20 < sma50) shouldTrigger = true;
+      // Check if this is a compound condition (has AND, OR, NOT, XOR, IF-THEN, or parentheses)
+      if (this.isCompoundCondition(rule.condition)) {
+        // Parse compound condition into AST and evaluate
+        const ast = this.parseCompoundCondition(rule.condition);
+        shouldTrigger = this.evaluateConditionNode(ast, (primitive) => this.evaluatePrimitiveCondition(primitive));
+        triggerDebugInfo = `Compound condition evaluated: ${shouldTrigger ? "TRUE" : "FALSE"}`;
+        console.log(`[TradingBot] Compound rule "${rule.condition}": ${triggerDebugInfo}`);
+      } else {
+        // Simple primitive condition - evaluate directly
+        shouldTrigger = this.evaluatePrimitiveCondition(rule.condition);
       }
 
-      // --- MACD Conditions ---
-      else if (condition.includes("macd bullish crossover") || condition.includes("macd cross above")) {
-        if (macd.crossover === "bullish_crossover") shouldTrigger = true;
-      } else if (condition.includes("macd bearish crossover") || condition.includes("macd cross below")) {
-        if (macd.crossover === "bearish_crossover") shouldTrigger = true;
-      } else if (condition.includes("macd bullish") || condition.includes("macd positive")) {
-        if (macd.trend === "bullish") shouldTrigger = true;
-      } else if (condition.includes("macd bearish") || condition.includes("macd negative")) {
-        if (macd.trend === "bearish") shouldTrigger = true;
-      } else if (condition.includes("macd histogram positive") || condition.includes("histogram above zero")) {
-        if (macd.histogram > 0) shouldTrigger = true;
-      } else if (condition.includes("macd histogram negative") || condition.includes("histogram below zero")) {
-        if (macd.histogram < 0) shouldTrigger = true;
-      } else if (condition.includes("macd above signal")) {
-        if (macd.macdLine > macd.signalLine) shouldTrigger = true;
-      } else if (condition.includes("macd below signal")) {
-        if (macd.macdLine < macd.signalLine) shouldTrigger = true;
-      }
-
-      // --- Volume Conditions ---
-      else if (condition.includes("volume spike") || condition.includes("high volume spike")) {
-        if (volume.isVolumeSpike) shouldTrigger = true;
-      } else if (condition.includes("high volume") || condition.includes("above average volume")) {
-        if (volume.isHighVolume) shouldTrigger = true;
-      } else if (condition.includes("low volume") || condition.includes("below average volume")) {
-        if (volume.isLowVolume) shouldTrigger = true;
-      } else if (condition.includes("volume increasing") || condition.includes("rising volume")) {
-        if (volume.volumeTrend === "increasing") shouldTrigger = true;
-      } else if (condition.includes("volume decreasing") || condition.includes("falling volume")) {
-        if (volume.volumeTrend === "decreasing") shouldTrigger = true;
-      }
-
-      // --- Combined Conditions (MACD + Volume confirmation) ---
-      else if (condition.includes("macd bullish with volume") || condition.includes("bullish with volume confirmation")) {
-        if (macd.trend === "bullish" && volume.isHighVolume) shouldTrigger = true;
-      } else if (condition.includes("macd bearish with volume") || condition.includes("bearish with volume confirmation")) {
-        if (macd.trend === "bearish" && volume.isHighVolume) shouldTrigger = true;
-      } else if (condition.includes("macd crossover with volume")) {
-        if (macd.crossover !== "none" && volume.isHighVolume) shouldTrigger = true;
-      } else if (condition.includes("bullish breakout") || condition.includes("breakout with volume")) {
-        // Bullish breakout: MACD bullish + Volume spike + Price above SMA
-        if (macd.trend === "bullish" && volume.isVolumeSpike && currentPrice > sma20) {
-          shouldTrigger = true;
-        }
-      } else if (condition.includes("bearish breakdown")) {
-        // Bearish breakdown: MACD bearish + Volume spike + Price below SMA
-        if (macd.trend === "bearish" && volume.isVolumeSpike && currentPrice < sma20) {
-          shouldTrigger = true;
-        }
-      }
-
-      // --- Simple Trend Conditions (uptrend/downtrend based on recent price action) ---
-      // Get the last few candles to determine trend
-      else if (condition.includes("uptrend") || condition.includes("upward trend") || 
-               condition.includes("trending up") || condition.includes("bullish trend") ||
-               condition.includes("price rising") || condition.includes("price going up")) {
-        // Check if last candle is green (close > open) and price is above previous close
-        if (klines.length >= 2) {
-          const lastCandle = klines[klines.length - 1];
-          const prevCandle = klines[klines.length - 2];
-          const isGreenCandle = lastCandle.close > lastCandle.open;
-          const priceAbovePrevClose = currentPrice > prevCandle.close;
-          if (isGreenCandle && priceAbovePrevClose) {
-            shouldTrigger = true;
-            triggerDebugInfo = `Uptrend detected: price=$${currentPrice.toFixed(2)} > prev close=$${prevCandle.close.toFixed(2)}, candle green`;
-          }
-        }
-      } else if (condition.includes("downtrend") || condition.includes("downward trend") || 
-                 condition.includes("trending down") || condition.includes("bearish trend") ||
-                 condition.includes("price falling") || condition.includes("price going down")) {
-        // Check if last candle is red (close < open) and price is below previous close
-        if (klines.length >= 2) {
-          const lastCandle = klines[klines.length - 1];
-          const prevCandle = klines[klines.length - 2];
-          const isRedCandle = lastCandle.close < lastCandle.open;
-          const priceBelowPrevClose = currentPrice < prevCandle.close;
-          if (isRedCandle && priceBelowPrevClose) {
-            shouldTrigger = true;
-            triggerDebugInfo = `Downtrend detected: price=$${currentPrice.toFixed(2)} < prev close=$${prevCandle.close.toFixed(2)}, candle red`;
-          }
-        }
-      }
-      // --- Green/Red Candle Conditions ---
-      else if (condition.includes("green candle") || condition.includes("bullish candle") || 
-               condition.includes("candle closes above") || condition.includes("close above open") ||
-               condition.includes("closes above its open")) {
-        if (klines.length >= 1) {
-          const lastCandle = klines[klines.length - 1];
-          if (lastCandle.close > lastCandle.open) {
-            shouldTrigger = true;
-            triggerDebugInfo = `Green candle: close=$${lastCandle.close.toFixed(2)} > open=$${lastCandle.open.toFixed(2)}`;
-          }
-        }
-      } else if (condition.includes("red candle") || condition.includes("bearish candle") || 
-                 condition.includes("candle closes below") || condition.includes("close below open") ||
-                 condition.includes("closes below its open")) {
-        if (klines.length >= 1) {
-          const lastCandle = klines[klines.length - 1];
-          if (lastCandle.close < lastCandle.open) {
-            shouldTrigger = true;
-            triggerDebugInfo = `Red candle: close=$${lastCandle.close.toFixed(2)} < open=$${lastCandle.open.toFixed(2)}`;
-          }
-        }
-      }
-      // --- Price vs Previous Close Conditions ---
-      else if (condition.includes("above previous close") || condition.includes("price above prev") ||
-               condition.includes("ticker above previous") || condition.includes("above the previous close")) {
-        if (klines.length >= 2) {
-          const prevCandle = klines[klines.length - 2];
-          if (currentPrice > prevCandle.close) {
-            shouldTrigger = true;
-            triggerDebugInfo = `Price above previous close: $${currentPrice.toFixed(2)} > $${prevCandle.close.toFixed(2)}`;
-          }
-        }
-      } else if (condition.includes("below previous close") || condition.includes("price below prev") ||
-                 condition.includes("ticker below previous") || condition.includes("below the previous close")) {
-        if (klines.length >= 2) {
-          const prevCandle = klines[klines.length - 2];
-          if (currentPrice < prevCandle.close) {
-            shouldTrigger = true;
-            triggerDebugInfo = `Price below previous close: $${currentPrice.toFixed(2)} < $${prevCandle.close.toFixed(2)}`;
-          }
-        }
-      }
-      // --- Positive/Negative Price Change Conditions ---
-      else if (condition.includes("positive change") || condition.includes("price change positive") ||
-               condition.includes("price is up") || condition.includes("gaining")) {
-        if (priceChange > 0) {
-          shouldTrigger = true;
-          triggerDebugInfo = `Positive price change: ${priceChange.toFixed(2)}%`;
-        }
-      } else if (condition.includes("negative change") || condition.includes("price change negative") ||
-                 condition.includes("price is down") || condition.includes("losing")) {
-        if (priceChange < 0) {
-          shouldTrigger = true;
-          triggerDebugInfo = `Negative price change: ${priceChange.toFixed(2)}%`;
-        }
-      }
-
-      // --- Price/Market Conditions ---
-      else if (condition.includes("oversold") && priceChange < -2) {
-        shouldTrigger = true;
-      } else if (condition.includes("overbought") && priceChange > 2) {
-        shouldTrigger = true;
-      } else if (condition.includes("no position") && !hasPosition) {
-        shouldTrigger = true;
-      } else if (condition.includes("has position") && hasPosition) {
-        shouldTrigger = true;
-      }
-      // --- Immediate Entry Conditions (always trigger if no position) ---
-      else if (
-        (condition.includes("immediate") || 
-         condition.includes("enter now") || 
-         condition.includes("market entry") ||
-         condition.includes("on start") ||
-         condition.includes("always enter") ||
-         condition.includes("entry signal")) && 
-        !hasPosition
-      ) {
-        shouldTrigger = true;
-        console.log(`[TradingBot] Immediate entry condition matched: "${rule.condition}"`);
-      }
-      
-      // --- Take Profit / Stop Loss based on percentage from entry ---
-      // Matches patterns like "price decreases by X%", "price increases by X%", "take profit", "stop loss"
-      else if (hasPosition && (condition.includes("take profit") || condition.includes("take-profit") || 
-               condition.includes("stop loss") || condition.includes("stop-loss") ||
-               condition.includes("price decreases") || condition.includes("price increases"))) {
-        // Extract percentage from condition
-        const percentMatch = condition.match(/(\d+\.?\d*)\s*%/);
-        if (percentMatch) {
-          const targetPercent = parseFloat(percentMatch[1]);
-          // Get entry price from position
-          const position = positions[0];
-          if (position && position.entryPrice) {
-            const entryPrice = position.entryPrice;
-            const pnlPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
-            const isLong = position.side === "long";
-            
-            // For long positions: profit = price up, loss = price down
-            // For short positions: profit = price down, loss = price up
-            const effectivePnl = isLong ? pnlPercent : -pnlPercent;
-            
-            if (condition.includes("take profit") || condition.includes("take-profit") || 
-                (condition.includes("decreases") && !isLong) || (condition.includes("increases") && isLong)) {
-              // Take profit - trigger when profit exceeds target
-              if (effectivePnl >= targetPercent) {
-                shouldTrigger = true;
-                triggerDebugInfo = `Take profit: ${effectivePnl.toFixed(2)}% >= ${targetPercent}% target`;
-              }
-            } else if (condition.includes("stop loss") || condition.includes("stop-loss") ||
-                       (condition.includes("increases") && !isLong) || (condition.includes("decreases") && isLong)) {
-              // Stop loss - trigger when loss exceeds target (negative PnL)
-              if (effectivePnl <= -targetPercent) {
-                shouldTrigger = true;
-                triggerDebugInfo = `Stop loss: ${effectivePnl.toFixed(2)}% <= -${targetPercent}% limit`;
-              }
-            }
-            
-            if (!shouldTrigger) {
-              console.log(`[TradingBot] TP/SL check: PnL=${effectivePnl.toFixed(2)}% (entry=$${entryPrice}, current=$${currentPrice}, ${isLong ? 'LONG' : 'SHORT'})`);
-            }
-          }
-        }
-      }
-      
-      // --- Price level breakout/breakdown conditions ---
-      // Matches "price breaks below X", "price breaks above X"
-      else if (condition.includes("price breaks") || condition.includes("breaks below") || condition.includes("breaks above")) {
-        const priceMatch = condition.match(/(\d+\.?\d*)/);
-        if (priceMatch) {
-          const targetPrice = parseFloat(priceMatch[1]);
-          if (condition.includes("below") && currentPrice < targetPrice) {
-            shouldTrigger = true;
-            triggerDebugInfo = `Price broke below ${targetPrice}: current=${currentPrice.toFixed(4)}`;
-          } else if (condition.includes("above") && currentPrice > targetPrice) {
-            shouldTrigger = true;
-            triggerDebugInfo = `Price broke above ${targetPrice}: current=${currentPrice.toFixed(4)}`;
-          }
-        }
-      }
-      
       // Debug: Log unmatched conditions
       if (!shouldTrigger) {
         console.log(`[TradingBot] Rule not matched: "${rule.condition}" (action: ${rule.action})`);
       }
 
       if (shouldTrigger) {
+        const condition = rule.condition.toLowerCase();
         // Build detailed reason with indicator values
         let reason = `Rule triggered: ${rule.condition}`;
         
-        // Add numeric trigger details if applicable
+        // Add debug info if applicable
         if (triggerDebugInfo) {
           reason += ` | ${triggerDebugInfo}`;
         }
@@ -1205,6 +1159,9 @@ class TradingBot {
         // Log the trigger for debugging
         console.log(`[TradingBot] TRIGGER FIRED: action=${rule.action}, reason=${reason}`);
         
+        // Clear evaluation context
+        this.evaluationContext = null;
+        
         return {
           action: rule.action,
           rule,
@@ -1212,6 +1169,9 @@ class TradingBot {
         };
       }
     }
+
+    // Clear evaluation context
+    this.evaluationContext = null;
 
     return { action: "hold", reason: "No rules triggered" };
   }
