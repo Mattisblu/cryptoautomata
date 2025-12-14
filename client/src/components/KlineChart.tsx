@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries, type IChartApi, type ISeriesApi, type CandlestickData, type Time, type LineData, type HistogramData, type SeriesMarker } from "lightweight-charts";
+import { createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries, type IChartApi, type ISeriesApi, type CandlestickData, type Time, type LineData, type HistogramData } from "lightweight-charts";
 import { useTradingContext } from "@/lib/tradingContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -9,10 +9,6 @@ import {
   calculateEMA,
   calculateMACD,
   calculateBollingerBands,
-  generateMACDSignals,
-  type IndicatorDataPoint,
-  type MACDDataPoint,
-  type BollingerBandsDataPoint,
 } from "@/lib/indicators";
 
 const timeframes = [
@@ -29,7 +25,6 @@ interface IndicatorState {
   ema: boolean;
   macd: boolean;
   bb: boolean;
-  signals: boolean;
 }
 
 export function KlineChart() {
@@ -53,7 +48,6 @@ export function KlineChart() {
     ema: true,
     macd: false,
     bb: false,
-    signals: true,
   });
 
   const containerRefCallback = useCallback((node: HTMLDivElement | null) => {
@@ -323,11 +317,6 @@ export function KlineChart() {
     };
   }, [klines]);
 
-  const macdSignals = useMemo(() => {
-    if (!indicators.signals || macdData.length === 0) return [];
-    return generateMACDSignals(macdData);
-  }, [macdData, indicators.signals]);
-
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current) return;
 
@@ -341,22 +330,10 @@ export function KlineChart() {
       }));
       seriesRef.current.setData(chartData);
 
-      if (indicators.signals && macdSignals.length > 0) {
-        const markers: SeriesMarker<Time>[] = macdSignals.map((s) => ({
-          time: s.time as Time,
-          position: s.position,
-          color: s.color,
-          shape: s.shape,
-          text: s.text,
-        }));
-        seriesRef.current.setMarkers(markers);
-      } else {
-        seriesRef.current.setMarkers([]);
-      }
 
       chartRef.current.timeScale().fitContent();
     }
-  }, [klines, macdSignals, indicators.signals]);
+  }, [klines]);
 
   useEffect(() => {
     if (!smaSeriesRef.current) return;
@@ -507,15 +484,6 @@ export function KlineChart() {
           >
             <BarChart3 className="h-3 w-3 mr-1" />
             MACD
-          </Button>
-          <Button
-            variant={indicators.signals ? "secondary" : "ghost"}
-            size="sm"
-            className="h-7 px-2 text-xs font-mono"
-            onClick={() => toggleIndicator("signals")}
-            data-testid="button-indicator-signals"
-          >
-            Signals
           </Button>
         </div>
 
