@@ -20,10 +20,14 @@ function formatTime(timestamp: number): string {
   });
 }
 
-function AlgorithmDisplay({ algorithm, onLoad }: { algorithm: TradingAlgorithm; onLoad: () => void }) {
+function AlgorithmDisplay({ algorithm, onLoad, onReject }: { algorithm: TradingAlgorithm; onLoad: () => void; onReject?: () => void }) {
   const [copied, setCopied] = useState(false);
   const [showJson, setShowJson] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isApproved, setIsApproved] = useState(false);
+  const [isRejected, setIsRejected] = useState(false);
   const { activeAlgorithm, setActiveAlgorithm } = useTradingContext();
+  const { toast } = useToast();
   const isActive = activeAlgorithm?.id === algorithm.id;
 
   const copyToClipboard = () => {
@@ -32,10 +36,49 @@ function AlgorithmDisplay({ algorithm, onLoad }: { algorithm: TradingAlgorithm; 
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const loadAlgorithm = () => {
-    setActiveAlgorithm(algorithm);
-    onLoad();
+  const approveAndLoad = async () => {
+    setIsApproving(true);
+    try {
+      const response = await apiRequest("POST", "/api/algorithms", algorithm);
+      const savedAlgorithm = await response.json();
+      setActiveAlgorithm(savedAlgorithm);
+      setIsApproved(true);
+      onLoad();
+      toast({
+        title: "Algorithm Approved & Saved",
+        description: `"${algorithm.name}" is now active and saved to your Strategies page.`,
+      });
+    } catch (error) {
+      console.error("Failed to save algorithm:", error);
+      toast({
+        title: "Failed to Save",
+        description: "Could not save algorithm. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsApproving(false);
+    }
   };
+
+  const rejectAlgorithm = () => {
+    setIsRejected(true);
+    onReject?.();
+    toast({
+      title: "Algorithm Rejected",
+      description: "The suggested algorithm has been dismissed.",
+    });
+  };
+
+  if (isRejected) {
+    return (
+      <div className="mt-3 border rounded-md bg-muted/30 p-3 opacity-60">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <XCircle className="h-4 w-4" />
+          <span className="text-sm">Algorithm rejected</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-3 border rounded-md bg-muted/30 overflow-hidden">
@@ -46,20 +89,56 @@ function AlgorithmDisplay({ algorithm, onLoad }: { algorithm: TradingAlgorithm; 
         <Badge variant="outline" className="text-[10px] flex-shrink-0">
           v{algorithm.version}
         </Badge>
+        {isApproved && (
+          <Badge variant="secondary" className="text-[10px] flex-shrink-0 gap-1">
+            <CheckCircle2 className="h-2.5 w-2.5" />
+            Saved
+          </Badge>
+        )}
       </div>
       
-      {/* Action buttons - Always visible at top */}
+      {/* Action buttons - Approve/Reject or Already Active */}
       <div className="flex items-center justify-between gap-2 px-3 py-2 bg-background/50">
-        <Button
-          variant={isActive ? "secondary" : "default"}
-          size="sm"
-          className="h-8 text-xs flex-1"
-          onClick={loadAlgorithm}
-          disabled={isActive}
-          data-testid="button-load-algorithm"
-        >
-          {isActive ? "Algorithm Loaded" : "Load Algorithm"}
-        </Button>
+        {isApproved || isActive ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-8 text-xs flex-1 gap-1"
+            disabled
+            data-testid="button-algorithm-approved"
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Algorithm Active
+          </Button>
+        ) : (
+          <div className="flex items-center gap-2 flex-1">
+            <Button
+              variant="default"
+              size="sm"
+              className="h-8 text-xs flex-1 gap-1"
+              onClick={approveAndLoad}
+              disabled={isApproving}
+              data-testid="button-approve-algorithm"
+            >
+              {isApproving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              )}
+              {isApproving ? "Saving..." : "Approve & Load"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1"
+              onClick={rejectAlgorithm}
+              data-testid="button-reject-algorithm"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Reject
+            </Button>
+          </div>
+        )}
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
