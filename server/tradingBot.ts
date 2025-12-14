@@ -72,6 +72,14 @@ export interface RuleWarning {
   isUnrecognized: boolean;
 }
 
+// Type for compound condition AST nodes
+type ConditionNodeType = 'LEAF' | 'AND' | 'OR' | 'NOT' | 'XOR' | 'IF_THEN';
+interface ConditionNode {
+  type: ConditionNodeType;
+  children?: ConditionNode[];
+  condition?: string;
+}
+
 class TradingBot {
   private config: TradingBotConfig | null = null;
   private reportedWarnings: Set<string> = new Set(); // Track already reported warnings
@@ -709,6 +717,136 @@ class TradingBot {
         message: `[${modeLabel}] Trailing stop set: ${position.symbol} with ${riskManagement.trailingStopPercent}% distance`,
         data: { stopOrderId: trailingOrder.id, trailingDistance: riskManagement.trailingStopPercent },
       });
+    }
+  }
+
+  // ============================================================
+  // COMPOUND CONDITION PARSER
+  // Supports: AND, OR, NOT, XOR, IF-THEN, and parentheses for nesting
+  // ============================================================
+
+  // Token types for parsing
+  private tokenizeCondition(condition: string): string[] {
+    let normalized = condition
+      .replace(/\(/g, ' ( ')
+      .replace(/\)/g, ' ) ')
+      .replace(/\bAND\b/gi, ' AND ')
+      .replace(/\bOR\b/gi, ' OR ')
+      .replace(/\bNOT\b/gi, ' NOT ')
+      .replace(/\bXOR\b/gi, ' XOR ')
+      .replace(/\bIF\b/gi, ' IF ')
+      .replace(/\bTHEN\b/gi, ' THEN ');
+    return normalized.split(/\s+/).filter(t => t.length > 0);
+  }
+
+  // Check if a condition is compound (has operators)
+  private isCompoundCondition(condition: string): boolean {
+    const upper = condition.toUpperCase();
+    return upper.includes(' AND ') || upper.includes(' OR ') || 
+           upper.includes(' NOT ') || upper.includes(' XOR ') ||
+           upper.includes('(') || (upper.includes(' IF ') && upper.includes(' THEN '));
+  }
+
+  // Parse a compound condition into an AST
+  private parseCompoundCondition(condition: string): ConditionNode {
+    const tokens = this.tokenizeCondition(condition);
+    const { node } = this.parseExpression(tokens, 0);
+    return node;
+  }
+
+  private parseExpression(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    let { node: left, nextPos } = this.parseOr(tokens, pos);
+    if (nextPos < tokens.length && tokens[nextPos]?.toUpperCase() === 'IF') {
+      const ifResult = this.parseOr(tokens, nextPos + 1);
+      if (ifResult.nextPos < tokens.length && tokens[ifResult.nextPos]?.toUpperCase() === 'THEN') {
+        const thenResult = this.parseOr(tokens, ifResult.nextPos + 1);
+        return { node: { type: 'IF_THEN', children: [ifResult.node, thenResult.node] }, nextPos: thenResult.nextPos };
+      }
+    }
+    return { node: left, nextPos };
+  }
+
+  private parseOr(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    let { node: left, nextPos } = this.parseXor(tokens, pos);
+    while (nextPos < tokens.length && tokens[nextPos]?.toUpperCase() === 'OR') {
+      const { node: right, nextPos: newPos } = this.parseXor(tokens, nextPos + 1);
+      left = { type: 'OR', children: [left, right] };
+      nextPos = newPos;
+    }
+    return { node: left, nextPos };
+  }
+
+  private parseXor(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    let { node: left, nextPos } = this.parseAnd(tokens, pos);
+    while (nextPos < tokens.length && tokens[nextPos]?.toUpperCase() === 'XOR') {
+      const { node: right, nextPos: newPos } = this.parseAnd(tokens, nextPos + 1);
+      left = { type: 'XOR', children: [left, right] };
+      nextPos = newPos;
+    }
+    return { node: left, nextPos };
+  }
+
+  private parseAnd(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    let { node: left, nextPos } = this.parseNot(tokens, pos);
+    while (nextPos < tokens.length && tokens[nextPos]?.toUpperCase() === 'AND') {
+      const { node: right, nextPos: newPos } = this.parseNot(tokens, nextPos + 1);
+      left = { type: 'AND', children: [left, right] };
+      nextPos = newPos;
+    }
+    return { node: left, nextPos };
+  }
+
+  private parseNot(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    if (pos < tokens.length && tokens[pos]?.toUpperCase() === 'NOT') {
+      const { node: child, nextPos } = this.parseNot(tokens, pos + 1);
+      return { node: { type: 'NOT', children: [child] }, nextPos };
+    }
+    return this.parsePrimary(tokens, pos);
+  }
+
+  private parsePrimary(tokens: string[], pos: number): { node: ConditionNode; nextPos: number } {
+    if (pos >= tokens.length) {
+      return { node: { type: 'LEAF', condition: '' }, nextPos: pos };
+    }
+    if (tokens[pos] === '(') {
+      const { node, nextPos } = this.parseExpression(tokens, pos + 1);
+      const finalPos = tokens[nextPos] === ')' ? nextPos + 1 : nextPos;
+      return { node, nextPos: finalPos };
+    }
+    const operators = ['AND', 'OR', 'NOT', 'XOR', 'IF', 'THEN', '(', ')'];
+    const conditionTokens: string[] = [];
+    let currentPos = pos;
+    while (currentPos < tokens.length) {
+      const token = tokens[currentPos];
+      if (operators.includes(token.toUpperCase()) || token === '(' || token === ')') break;
+      conditionTokens.push(token);
+      currentPos++;
+    }
+    return { node: { type: 'LEAF', condition: conditionTokens.join(' ') }, nextPos: currentPos };
+  }
+
+  private evaluateConditionNode(node: ConditionNode, evaluatePrimitive: (condition: string) => boolean): boolean {
+    switch (node.type) {
+      case 'LEAF':
+        return evaluatePrimitive(node.condition || '');
+      case 'AND':
+        return node.children?.every(child => this.evaluateConditionNode(child, evaluatePrimitive)) ?? false;
+      case 'OR':
+        return node.children?.some(child => this.evaluateConditionNode(child, evaluatePrimitive)) ?? false;
+      case 'NOT':
+        return !this.evaluateConditionNode(node.children![0], evaluatePrimitive);
+      case 'XOR': {
+        const results = node.children?.map(child => this.evaluateConditionNode(child, evaluatePrimitive)) ?? [];
+        return results.filter(r => r).length === 1;
+      }
+      case 'IF_THEN': {
+        const [ifNode, thenNode] = node.children!;
+        const ifResult = this.evaluateConditionNode(ifNode, evaluatePrimitive);
+        if (!ifResult) return true;
+        return this.evaluateConditionNode(thenNode, evaluatePrimitive);
+      }
+      default:
+        return false;
     }
   }
 

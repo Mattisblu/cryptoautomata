@@ -71,7 +71,12 @@ When the user asks you to generate a trading strategy or algorithm, you MUST res
     "stopLossPercent": 2,
     "takeProfitPercent": 4,
     "maxDailyLoss": 100,
-    "trailingStop": false
+    "trailingStop": false,
+    "trailingStopPercent": 1.5,
+    "tradeCooldownSeconds": null,
+    "maxTradesPerHour": null,
+    "minHoldTimeSeconds": null,
+    "maxConcurrentPositions": null
   },
   "status": "active"
 }
@@ -140,6 +145,29 @@ CRITICAL: Rule conditions MUST use ONLY these recognized formats (the trading bo
 **Immediate Entry:**
 - "immediate" or "enter now" or "market entry" - enter immediately if no position
 
+**COMPOUND CONDITIONS (Advanced Logic):**
+You can combine multiple conditions using logical operators. Use parentheses for grouping.
+
+- **AND** - Both conditions must be true: "macd bullish AND volume spike"
+- **OR** - Either condition must be true: "uptrend OR macd bullish crossover"
+- **NOT** - Inverts the condition: "NOT downtrend" (true when not in downtrend)
+- **XOR** - Exactly one condition must be true: "macd bullish XOR high volume"
+- **Parentheses** - Group conditions: "(macd bullish AND volume spike) OR bullish breakout"
+- **IF-THEN** - Conditional logic: "IF macd bullish THEN volume spike" (if first is true, second must also be true)
+
+Compound condition examples:
+- "macd bullish AND price above sma" - Both must be true
+- "volume spike OR macd bullish crossover" - Either triggers action
+- "(uptrend AND high volume) OR bullish breakout" - Nested logic
+- "NOT overbought AND macd bullish" - Not overbought AND bullish
+- "macd bullish XOR volume spike" - One but not both
+- "IF has position THEN take profit 3%" - Conditional close
+
+Nesting rules:
+- Maximum 3 levels of parentheses supported
+- Operators are evaluated left to right, parentheses first
+- NOT applies to the immediately following condition or group
+
 DO NOT use any other condition formats - they will not be recognized by the trading bot!
 
 Example valid rules:
@@ -149,6 +177,9 @@ Example valid rules:
 - {"condition": "take profit 3%", "action": "close", "priority": 1}
 - {"condition": "stop loss 2%", "action": "close", "priority": 2}
 - {"condition": "price > 50000", "action": "buy", "priority": 1}
+- {"condition": "macd bullish AND volume spike", "action": "buy", "priority": 1}
+- {"condition": "(uptrend AND high volume) OR bullish breakout", "action": "buy", "priority": 1}
+- {"condition": "NOT downtrend AND macd bullish", "action": "buy", "priority": 1}
 
 Important guidelines:
 1. Always use isolated margin mode for safety
@@ -159,6 +190,11 @@ Important guidelines:
 6. For scalping strategies, use tighter stops and smaller position sizes
 7. Analyze provided kline data for trend, support/resistance levels
 8. If ticker data shows high volatility, recommend lower leverage
+9. CRITICAL: When "User Risk Settings" are provided in the context, you MUST use those values in your algorithm's riskManagement section:
+   - Use the user's maxPositionSize, maxLeverage, stopLossPercent, takeProfitPercent, and maxDailyLoss
+   - Include trailingStop and trailingStopPercent if the user has them enabled
+   - Add frequency controls if provided: tradeCooldownSeconds, maxTradesPerHour, minHoldTimeSeconds, maxConcurrentPositions
+   - These user settings are their preferred risk parameters - always respect them
 
 When analyzing market data:
 - Look at price trends from kline data
@@ -280,6 +316,16 @@ User Risk Settings:
 - Take-Profit: ${rp.autoTakeProfit ? `${rp.takeProfitPercent}% (enabled)` : "disabled"}
 - Trailing Stop: ${rp.trailingStop ? `${rp.trailingStopPercent}% (enabled)` : "disabled"}
 - Max Daily Loss: $${rp.maxDailyLoss}`);
+    
+    // Add frequency controls if any are enabled
+    const frequencyControls: string[] = [];
+    if (rp.tradeCooldownSeconds) frequencyControls.push(`Trade Cooldown: ${rp.tradeCooldownSeconds}s`);
+    if (rp.maxTradesPerHour) frequencyControls.push(`Max Trades/Hour: ${rp.maxTradesPerHour}`);
+    if (rp.minHoldTimeSeconds) frequencyControls.push(`Min Hold Time: ${rp.minHoldTimeSeconds}s`);
+    if (rp.maxConcurrentPositions) frequencyControls.push(`Max Concurrent Positions: ${rp.maxConcurrentPositions}`);
+    if (frequencyControls.length > 0) {
+      parts.push(`\nFrequency Controls:\n- ${frequencyControls.join('\n- ')}`);
+    }
   }
 
   if (context.ticker) {
