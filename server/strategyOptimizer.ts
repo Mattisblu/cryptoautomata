@@ -17,6 +17,7 @@ interface OptimizerConfig {
   symbol: string;
   algorithm: TradingAlgorithm;
   optimizationMode: OptimizationMode;
+  timeframe: string; // User-selected timeframe for analysis (1m, 5m, 15m, etc.)
   onSuggestion: (suggestion: Omit<OptimizationSuggestion, "id" | "timestamp">) => void;
   onMetricsUpdate: (metrics: LiveStrategyMetrics) => void;
   onAlgorithmUpdate?: (algorithm: TradingAlgorithm) => void;
@@ -147,7 +148,8 @@ class StrategyOptimizer {
 
       // Get current market data - getTicker/getKlines now return result types
       const tickerResult = await exchangeService.getTicker(exchange, symbol);
-      const klinesResult = await exchangeService.getKlines(exchange, symbol, "15m", 50);
+      const timeframe = this.config.timeframe || "15m";
+      const klinesResult = await exchangeService.getKlines(exchange, symbol, timeframe, 50);
       const ticker = tickerResult.ticker;
       const klines = klinesResult.klines;
       const positions = await storage.getPositions(exchange);
@@ -179,7 +181,7 @@ class StrategyOptimizer {
         positions,
         tradingMode: algorithm.mode,
         currentAlgorithm: algorithm,
-        timeframe: "15m",
+        timeframe,
         riskParameters: algorithm.riskManagement,
         executionMode: "paper",
         marketMaxLeverage: 100,

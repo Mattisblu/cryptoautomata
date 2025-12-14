@@ -189,6 +189,7 @@ class StrategyOrchestrator {
         symbol,
         algorithm,
         optimizationMode,
+        timeframe,
         onSuggestion: config.onOptimizationSuggestion || (() => {}),
         onMetricsUpdate: config.onMetricsUpdate || (() => {}),
         onAlgorithmUpdate: (algo) => {

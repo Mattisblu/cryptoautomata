@@ -222,6 +222,7 @@ class TradingBot {
         symbol: config.symbol,
         algorithm: config.algorithm,
         optimizationMode: config.optimizationMode,
+        timeframe: config.timeframe,
         onSuggestion: config.onOptimizationSuggestion || (() => {}),
         onMetricsUpdate: config.onMetricsUpdate || (() => {}),
         onAlgorithmUpdate: (algo) => {
