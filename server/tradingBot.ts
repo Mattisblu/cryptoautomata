@@ -629,12 +629,18 @@ class TradingBot {
     riskManagement: RiskManagement
   ): Promise<void> {
     const modeLabel = this.state.executionMode === "paper" ? "PAPER" : "REAL";
+    
+    // ROI-based calculation: With leverage, price only needs to move targetROI/leverage to achieve targetROI
+    // Example: 5% ROI target with 10x leverage = price needs to move 0.5%
+    const leverage = position.leverage || riskManagement.maxLeverage || 1;
 
     // Create stop-loss order if enabled
     if (riskManagement.autoStopLoss || riskManagement.stopLossPercent > 0) {
+      // Convert ROI% to actual price change%: priceChange = ROI% / leverage
+      const slPriceChangePercent = riskManagement.stopLossPercent / leverage;
       const slPrice = position.side === "long"
-        ? position.entryPrice * (1 - riskManagement.stopLossPercent / 100)
-        : position.entryPrice * (1 + riskManagement.stopLossPercent / 100);
+        ? position.entryPrice * (1 - slPriceChangePercent / 100)
+        : position.entryPrice * (1 + slPriceChangePercent / 100);
 
       const stopLossOrder: StopOrder = {
         id: randomUUID(),
@@ -655,16 +661,18 @@ class TradingBot {
 
       await storage.addTradeLog({
         type: "order",
-        message: `[${modeLabel}] Stop-loss set: ${position.symbol} @ ${slPrice.toFixed(2)} (${riskManagement.stopLossPercent}%)`,
-        data: { stopOrderId: stopLossOrder.id, triggerPrice: slPrice },
+        message: `[${modeLabel}] Stop-loss set: ${position.symbol} @ ${slPrice.toFixed(2)} (${riskManagement.stopLossPercent}% ROI = ${slPriceChangePercent.toFixed(3)}% price @ ${leverage}x)`,
+        data: { stopOrderId: stopLossOrder.id, triggerPrice: slPrice, roiPercent: riskManagement.stopLossPercent, priceChangePercent: slPriceChangePercent, leverage },
       });
     }
 
     // Create take-profit order if enabled
     if (riskManagement.autoTakeProfit || riskManagement.takeProfitPercent > 0) {
+      // Convert ROI% to actual price change%: priceChange = ROI% / leverage
+      const tpPriceChangePercent = riskManagement.takeProfitPercent / leverage;
       const tpPrice = position.side === "long"
-        ? position.entryPrice * (1 + riskManagement.takeProfitPercent / 100)
-        : position.entryPrice * (1 - riskManagement.takeProfitPercent / 100);
+        ? position.entryPrice * (1 + tpPriceChangePercent / 100)
+        : position.entryPrice * (1 - tpPriceChangePercent / 100);
 
       const takeProfitOrder: StopOrder = {
         id: randomUUID(),
@@ -685,13 +693,16 @@ class TradingBot {
 
       await storage.addTradeLog({
         type: "order",
-        message: `[${modeLabel}] Take-profit set: ${position.symbol} @ ${tpPrice.toFixed(2)} (${riskManagement.takeProfitPercent}%)`,
-        data: { stopOrderId: takeProfitOrder.id, triggerPrice: tpPrice },
+        message: `[${modeLabel}] Take-profit set: ${position.symbol} @ ${tpPrice.toFixed(2)} (${riskManagement.takeProfitPercent}% ROI = ${tpPriceChangePercent.toFixed(3)}% price @ ${leverage}x)`,
+        data: { stopOrderId: takeProfitOrder.id, triggerPrice: tpPrice, roiPercent: riskManagement.takeProfitPercent, priceChangePercent: tpPriceChangePercent, leverage },
       });
     }
 
     // Create trailing stop if enabled
     if (riskManagement.trailingStop && riskManagement.trailingStopPercent) {
+      // Convert trailing stop ROI% to actual price distance%
+      const trailingPriceChangePercent = riskManagement.trailingStopPercent / leverage;
+      
       const trailingOrder: StopOrder = {
         id: randomUUID(),
         positionId: position.id,
@@ -699,7 +710,7 @@ class TradingBot {
         triggerPrice: position.entryPrice, // Will be updated dynamically
         quantity: position.quantity,
         status: "active",
-        trailingDistance: riskManagement.trailingStopPercent,
+        trailingDistance: trailingPriceChangePercent, // Store the actual price change %, not ROI%
         highestPrice: position.side === "long" ? position.entryPrice : undefined,
         lowestPrice: position.side === "short" ? position.entryPrice : undefined,
         createdAt: Date.now(),
@@ -708,14 +719,14 @@ class TradingBot {
       await storage.addStopOrder(exchange, trailingOrder);
 
       // Update position with trailing stop reference
-      position.trailingStopDistance = riskManagement.trailingStopPercent;
+      position.trailingStopDistance = trailingPriceChangePercent;
       position.trailingStopOrderId = trailingOrder.id;
       await storage.updatePosition(exchange, position);
 
       await storage.addTradeLog({
         type: "order",
-        message: `[${modeLabel}] Trailing stop set: ${position.symbol} with ${riskManagement.trailingStopPercent}% distance`,
-        data: { stopOrderId: trailingOrder.id, trailingDistance: riskManagement.trailingStopPercent },
+        message: `[${modeLabel}] Trailing stop set: ${position.symbol} with ${riskManagement.trailingStopPercent}% ROI distance (${trailingPriceChangePercent.toFixed(3)}% price @ ${leverage}x)`,
+        data: { stopOrderId: trailingOrder.id, trailingDistance: trailingPriceChangePercent, roiPercent: riskManagement.trailingStopPercent, leverage },
       });
     }
   }
