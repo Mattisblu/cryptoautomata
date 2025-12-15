@@ -426,6 +426,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create/save a new algorithm
+  app.post("/api/algorithms", async (req, res) => {
+    try {
+      const algorithm = req.body;
+      
+      if (!algorithm || !algorithm.id || !algorithm.name) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Invalid algorithm data: id and name are required" 
+        });
+      }
+
+      await storage.saveAlgorithm(algorithm);
+      res.json({ success: true, algorithm });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/algorithms/:id", async (req, res) => {
     try {
       const algorithm = await storage.getAlgorithm(req.params.id);
