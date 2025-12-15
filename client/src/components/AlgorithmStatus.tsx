@@ -47,7 +47,9 @@ export function AlgorithmStatus() {
     stopped: { icon: CheckCircle, color: "text-muted-foreground", animate: false },
   };
 
-  const config = statusConfig[activeAlgorithm.status] || statusConfig.active;
+  // Use optional chaining with fallback for status (may be undefined)
+  const algorithmStatus = (activeAlgorithm as any).status || "active";
+  const config = statusConfig[algorithmStatus] || statusConfig.active;
   const StatusIcon = config.icon;
 
   return (
@@ -81,7 +83,7 @@ export function AlgorithmStatus() {
           <div className="bg-muted/50 rounded-md px-2 py-1.5">
             <span className="text-muted-foreground">Mode</span>
             <p className="font-medium capitalize">
-              {activeAlgorithm.mode.replace("-", " ")}
+              {(activeAlgorithm.mode || "ai-trading").replace("-", " ")}
             </p>
           </div>
           <div className="bg-muted/50 rounded-md px-2 py-1.5">
@@ -93,29 +95,29 @@ export function AlgorithmStatus() {
         <div className="space-y-1">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Rules</span>
-            <span className="font-mono">{activeAlgorithm.rules.length}</span>
+            <span className="font-mono">{activeAlgorithm.rules?.length || 0}</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Max Leverage</span>
-            <span className="font-mono">{activeAlgorithm.riskManagement.maxLeverage}x</span>
+            <span className="font-mono">{activeAlgorithm.riskManagement?.maxLeverage || 10}x</span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Stop Loss</span>
             <span className="font-mono text-loss">
-              {activeAlgorithm.riskManagement.stopLossPercent}%
+              {activeAlgorithm.riskManagement?.stopLossPercent || 2}%
             </span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Take Profit</span>
             <span className="font-mono text-profit">
-              {activeAlgorithm.riskManagement.takeProfitPercent}%
+              {activeAlgorithm.riskManagement?.takeProfitPercent || 5}%
             </span>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1 border-t">
           <Clock className="h-3 w-3" />
-          <span>Updated {formatTimestamp(activeAlgorithm.updatedAt)}</span>
+          <span>Updated {formatTimestamp(activeAlgorithm.updatedAt || activeAlgorithm.createdAt || Date.now())}</span>
         </div>
       </CardContent>
     </Card>
