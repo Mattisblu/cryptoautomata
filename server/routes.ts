@@ -426,7 +426,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create/save a new algorithm
+  // Create/save a new algorithm (upsert - handles duplicates gracefully)
   app.post("/api/algorithms", async (req, res) => {
     try {
       const algorithm = req.body;
@@ -438,8 +438,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      await storage.saveAlgorithm(algorithm);
-      res.json({ success: true, algorithm });
+      // Check if algorithm already exists (may have been auto-saved by /api/chat)
+      const existing = await storage.getAlgorithm(algorithm.id);
+      if (existing) {
+        // Already saved - just return success with the existing algorithm
+        res.json({ success: true, algorithm: existing });
+      } else {
+        // New algorithm - save it
+        await storage.saveAlgorithm(algorithm);
+        res.json({ success: true, algorithm });
+      }
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
