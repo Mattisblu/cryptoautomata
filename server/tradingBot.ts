@@ -1046,26 +1046,31 @@ class TradingBot {
       return true;
     }
 
-    // --- Take Profit / Stop Loss based on percentage from entry ---
+    // --- Take Profit / Stop Loss based on ROI percentage (accounts for leverage) ---
     if (hasPosition && (condition.includes("take profit") || condition.includes("take-profit") || 
          condition.includes("stop loss") || condition.includes("stop-loss") ||
          condition.includes("price decreases") || condition.includes("price increases"))) {
       const percentMatch = condition.match(/(\d+\.?\d*)\s*%/);
       if (percentMatch) {
-        const targetPercent = parseFloat(percentMatch[1]);
+        const targetROI = parseFloat(percentMatch[1]); // Target is ROI%, not price change%
         const position = positions[0];
         if (position && position.entryPrice) {
           const entryPrice = position.entryPrice;
-          const pnlPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+          const leverage = position.leverage || 1;
+          
+          // Calculate price change percentage
+          const priceChangePercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+          
+          // Convert to ROI: ROI% = priceChange% * leverage
           const isLong = position.side === "long";
-          const effectivePnl = isLong ? pnlPercent : -pnlPercent;
+          const effectiveROI = (isLong ? priceChangePercent : -priceChangePercent) * leverage;
           
           if (condition.includes("take profit") || condition.includes("take-profit") || 
               (condition.includes("decreases") && !isLong) || (condition.includes("increases") && isLong)) {
-            if (effectivePnl >= targetPercent) return true;
+            if (effectiveROI >= targetROI) return true;
           } else if (condition.includes("stop loss") || condition.includes("stop-loss") ||
                      (condition.includes("increases") && !isLong) || (condition.includes("decreases") && isLong)) {
-            if (effectivePnl <= -targetPercent) return true;
+            if (effectiveROI <= -targetROI) return true;
           }
         }
       }
