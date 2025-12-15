@@ -40,8 +40,8 @@ function AlgorithmDisplay({ algorithm, onLoad, onReject }: { algorithm: TradingA
     setIsApproving(true);
     try {
       const response = await apiRequest("POST", "/api/algorithms", algorithm);
-      const savedAlgorithm = await response.json();
-      setActiveAlgorithm(savedAlgorithm);
+      const data = await response.json();
+      setActiveAlgorithm(data.algorithm);
       setIsApproved(true);
       onLoad();
       toast({
