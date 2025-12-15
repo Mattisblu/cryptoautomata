@@ -379,10 +379,10 @@ ${context.positions.map((p) => `- ${p.symbol} ${p.side.toUpperCase()} ${p.quanti
     const rm = algo.riskManagement;
     parts.push(`
 Current Algorithm: ${algo.name} v${algo.version}
-- Rules: ${algo.rules.length}
-- Status: ${algo.status}
-- Algorithm SL: ${rm.stopLossPercent}%, TP: ${rm.takeProfitPercent}%
-- Algorithm Leverage: ${rm.maxLeverage}x`);
+- Rules: ${algo.rules?.length || 0}
+- Status: ${algo.status || 'active'}
+- Algorithm SL: ${rm?.stopLossPercent || 2}%, TP: ${rm?.takeProfitPercent || 5}%
+- Algorithm Leverage: ${rm?.maxLeverage || 10}x`);
   }
 
   return parts.length > 0 ? `Current Market Context:\n${parts.join("\n")}` : "";
