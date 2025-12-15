@@ -98,7 +98,7 @@ COMBINED CONDITIONS:
 - "bearish breakdown"
 
 PRICE CONDITIONS:
-- "price > X", "price < X", "price >= X", "price <= X" (numeric)
+- "price > X", "price < X", "price >= X", "price <= X", "price = X" (numeric comparisons)
 - "price breaks", "breaks above", "breaks below"
 - "oversold", "overbought"
 
