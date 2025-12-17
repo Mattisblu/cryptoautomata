@@ -322,6 +322,48 @@ export class PositionBroker {
     console.log(`[PositionBroker] Closed ${positions.length} positions for session ${sessionId}, total PnL: ${totalPnl.toFixed(4)}`);
     return totalPnl;
   }
+
+  async closePositionsByReason(
+    currentPrice: number,
+    reason: string,
+    filter?: { sessionId?: string }
+  ): Promise<{ closedCount: number; totalPnl: number; closedPositions: LogicalPosition[] }> {
+    let positions: LogicalPosition[];
+    
+    if (filter?.sessionId) {
+      positions = await this.getSessionPositions(filter.sessionId);
+    } else {
+      positions = await this.getOpenPositions();
+    }
+
+    let totalPnl = 0;
+    const closedPositions: LogicalPosition[] = [];
+
+    for (const position of positions) {
+      const result = await this.closePosition({
+        logicalPositionId: position.id,
+        exitPrice: currentPrice,
+        reason,
+      });
+      
+      if (result.closed) {
+        totalPnl += result.pnl;
+        closedPositions.push(position);
+      }
+    }
+
+    console.log(`[PositionBroker] Bulk closed ${closedPositions.length} positions for reason "${reason}", total PnL: ${totalPnl.toFixed(4)}`);
+    return { closedCount: closedPositions.length, totalPnl, closedPositions };
+  }
+
+  async getPositionCount(sessionId?: string): Promise<number> {
+    if (sessionId) {
+      const positions = await this.getSessionPositions(sessionId);
+      return positions.length;
+    }
+    const positions = await this.getOpenPositions();
+    return positions.length;
+  }
 }
 
 const brokerInstances: Map<string, PositionBroker> = new Map();

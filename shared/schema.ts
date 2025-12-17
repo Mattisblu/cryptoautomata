@@ -528,6 +528,28 @@ export interface TradingRule {
   priority: number;
 }
 
+export interface VolatilityGuardConfig {
+  enabled: boolean;
+  shortWindow: number;         // Short ATR/sigma window (default: 5 bars)
+  longWindow: number;          // Long baseline window (default: 30 bars)
+  atrMultiplier: number;       // ATR ratio threshold to trigger (default: 3.0)
+  sigmaMultiplier: number;     // Sigma ratio threshold (default: 2.5)
+  wickRatioThreshold: number;  // Max wick ratio before trigger (default: 0.6)
+  barPersistence: number;      // Bars to sustain before action (default: 2)
+  cooldownMs: number;          // Cooldown after trigger (default: 60000)
+}
+
+export const defaultVolatilityGuardConfig: VolatilityGuardConfig = {
+  enabled: false,
+  shortWindow: 5,
+  longWindow: 30,
+  atrMultiplier: 3.0,
+  sigmaMultiplier: 2.5,
+  wickRatioThreshold: 0.6,
+  barPersistence: 2,
+  cooldownMs: 60000,
+};
+
 export interface RiskManagement {
   maxPositionSize: number;
   maxLeverage: number;
@@ -544,7 +566,21 @@ export interface RiskManagement {
   maxTradesPerHour?: number | null;        // Hard cap on trades per hour
   minHoldTimeSeconds?: number | null;      // Minimum time to hold a position
   maxConcurrentPositions?: number | null;  // Limit open positions at once
+  // Volatility protection
+  volatilityGuard?: VolatilityGuardConfig;
 }
+
+// Volatility guard schema for UI
+export const volatilityGuardSchema = z.object({
+  enabled: z.boolean().default(false),
+  shortWindow: z.number().min(2).max(20).default(5),
+  longWindow: z.number().min(10).max(100).default(30),
+  atrMultiplier: z.number().min(1.5).max(10).default(3.0),
+  sigmaMultiplier: z.number().min(1.5).max(10).default(2.5),
+  wickRatioThreshold: z.number().min(0.3).max(0.9).default(0.6),
+  barPersistence: z.number().min(1).max(10).default(2),
+  cooldownMs: z.number().min(10000).max(600000).default(60000),
+});
 
 // Risk parameters configuration schema for UI
 export const riskParametersSchema = z.object({
@@ -563,6 +599,8 @@ export const riskParametersSchema = z.object({
   maxTradesPerHour: z.number().min(1).max(100).nullable().optional(),
   minHoldTimeSeconds: z.number().min(5).max(3600).nullable().optional(),
   maxConcurrentPositions: z.number().min(1).max(10).nullable().optional(),
+  // Volatility protection
+  volatilityGuard: volatilityGuardSchema.optional(),
 });
 
 export type RiskParameters = z.infer<typeof riskParametersSchema>;

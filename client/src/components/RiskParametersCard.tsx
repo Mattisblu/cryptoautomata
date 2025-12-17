@@ -11,8 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useTradingContext } from "@/lib/tradingContext";
-import { Shield, TrendingUp, TrendingDown, Activity, Save, RefreshCw, AlertTriangle, Clock, Gauge, Timer, Layers } from "lucide-react";
-import type { RiskParameters } from "@shared/schema";
+import { Shield, TrendingUp, TrendingDown, Activity, Save, RefreshCw, AlertTriangle, Clock, Gauge, Timer, Layers, Zap, BarChart2 } from "lucide-react";
+import type { RiskParameters, VolatilityGuardConfig } from "@shared/schema";
+import { defaultVolatilityGuardConfig } from "@shared/schema";
 
 const defaultRiskParams: RiskParameters = {
   maxPositionSize: 1000,
@@ -484,6 +485,127 @@ export function RiskParametersCard() {
                 data-testid="slider-max-concurrent"
                 className="w-full"
               />
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-orange-500" />
+            <Label className="text-sm font-medium">Volatility Guard</Label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Automatically close positions when erratic price movement is detected.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BarChart2 className="h-4 w-4 text-orange-400" />
+              <Label className="text-sm">Enable Volatility Guard</Label>
+            </div>
+            <Switch
+              checked={params.volatilityGuard?.enabled ?? false}
+              onCheckedChange={(checked) => {
+                const currentConfig = params.volatilityGuard ?? defaultVolatilityGuardConfig;
+                updateParam('volatilityGuard', { ...currentConfig, enabled: checked });
+              }}
+              data-testid="switch-volatility-guard"
+            />
+          </div>
+          
+          {params.volatilityGuard?.enabled && (
+            <div className="space-y-4 pl-6">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">ATR Spike Threshold</span>
+                  <span className="font-mono text-orange-400">{params.volatilityGuard?.atrMultiplier ?? 3.0}x</span>
+                </div>
+                <Slider
+                  value={[params.volatilityGuard?.atrMultiplier ?? 3.0]}
+                  onValueChange={([value]) => {
+                    const currentConfig = params.volatilityGuard ?? defaultVolatilityGuardConfig;
+                    updateParam('volatilityGuard', { ...currentConfig, atrMultiplier: value });
+                  }}
+                  min={1.5}
+                  max={5}
+                  step={0.25}
+                  data-testid="slider-atr-multiplier"
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Trigger when short-term ATR exceeds baseline by this multiple
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Volatility Ratio</span>
+                  <span className="font-mono text-orange-400">{params.volatilityGuard?.sigmaMultiplier ?? 2.5}x</span>
+                </div>
+                <Slider
+                  value={[params.volatilityGuard?.sigmaMultiplier ?? 2.5]}
+                  onValueChange={([value]) => {
+                    const currentConfig = params.volatilityGuard ?? defaultVolatilityGuardConfig;
+                    updateParam('volatilityGuard', { ...currentConfig, sigmaMultiplier: value });
+                  }}
+                  min={1.5}
+                  max={5}
+                  step={0.25}
+                  data-testid="slider-sigma-multiplier"
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Trigger when price volatility exceeds normal by this multiple
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Wick Ratio Threshold</span>
+                  <span className="font-mono text-orange-400">{((params.volatilityGuard?.wickRatioThreshold ?? 0.6) * 100).toFixed(0)}%</span>
+                </div>
+                <Slider
+                  value={[(params.volatilityGuard?.wickRatioThreshold ?? 0.6) * 100]}
+                  onValueChange={([value]) => {
+                    const currentConfig = params.volatilityGuard ?? defaultVolatilityGuardConfig;
+                    updateParam('volatilityGuard', { ...currentConfig, wickRatioThreshold: value / 100 });
+                  }}
+                  min={30}
+                  max={90}
+                  step={5}
+                  data-testid="slider-wick-ratio"
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Trigger when candle wicks exceed this % of total range
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Persistence Bars</span>
+                  <span className="font-mono text-orange-400">{params.volatilityGuard?.barPersistence ?? 2}</span>
+                </div>
+                <Slider
+                  value={[params.volatilityGuard?.barPersistence ?? 2]}
+                  onValueChange={([value]) => {
+                    const currentConfig = params.volatilityGuard ?? defaultVolatilityGuardConfig;
+                    updateParam('volatilityGuard', { ...currentConfig, barPersistence: value });
+                  }}
+                  min={1}
+                  max={5}
+                  step={1}
+                  data-testid="slider-bar-persistence"
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Number of bars volatility must persist before triggering
+                </p>
+              </div>
             </div>
           )}
         </div>

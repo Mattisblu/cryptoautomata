@@ -7,13 +7,16 @@ import type {
   LiveStrategyMetrics,
   RunningStrategy,
   RiskManagement,
-  Position 
+  Position,
+  VolatilityGuardConfig 
 } from "@shared/schema";
+import { defaultVolatilityGuardConfig } from "@shared/schema";
 import { storage } from "./storage";
 import { exchangeService } from "./exchangeService";
 import { notificationService } from "./notificationService";
 import { strategyOptimizer } from "./strategyOptimizer";
 import { getPositionBroker } from "./positionBroker";
+import { getVolatilityGuard } from "./volatilityGuard";
 import { randomUUID } from "crypto";
 
 // Type for compound condition AST nodes
@@ -445,8 +448,76 @@ class StrategyOrchestrator {
       
       await storage.setTicker(exchange, symbol, ticker);
 
-      // Check stop conditions on logical positions via PositionBroker
+      // Get Position Broker
       const broker = getPositionBroker(exchange, symbol);
+      const riskManagement = algorithm.riskManagement;
+      
+      // === VOLATILITY GUARD CHECK ===
+      // Update volatility buffer with latest klines and check for dangerous market conditions
+      const volatilityGuardConfig = riskManagement.volatilityGuard ?? defaultVolatilityGuardConfig;
+      const volatilityGuard = getVolatilityGuard(exchange, symbol, volatilityGuardConfig);
+      volatilityGuard.update(klines);
+      
+      const volatilityCheck = volatilityGuard.check();
+      
+      if (volatilityCheck.triggered) {
+        // Critical volatility detected - close all positions immediately
+        const modeLabel = executionMode === "paper" ? "PAPER" : "REAL";
+        console.log(`[VolatilityGuard] CRITICAL volatility detected for ${symbol}: ${volatilityCheck.reason}`);
+        
+        const closeResult = await broker.closePositionsByReason(
+          ticker.lastPrice,
+          "volatility_guard",
+          { sessionId }
+        );
+        
+        if (closeResult.closedCount > 0) {
+          // Close corresponding exchange positions
+          for (const closedPos of closeResult.closedPositions) {
+            if (closedPos.exchangePositionId) {
+              const matchingExchangePos = symbolPositions.find(p => p.id === closedPos.exchangePositionId);
+              if (matchingExchangePos) {
+                await exchangeService.closePosition(exchange, credentials, matchingExchangePos.id);
+                await storage.deletePosition(exchange, matchingExchangePos.id);
+              }
+            }
+          }
+          
+          await notificationService.notify({
+            type: "error",
+            title: "Volatility Guard Triggered",
+            message: `[${modeLabel}] VOLATILITY GUARD closed ${closeResult.closedCount} positions on ${symbol}. PnL: ${closeResult.totalPnl.toFixed(4)} USDT. Reason: ${volatilityCheck.reason}`,
+            exchange,
+            symbol,
+            pnl: closeResult.totalPnl,
+            data: {
+              atrRatio: volatilityCheck.atrRatio,
+              sigmaRatio: volatilityCheck.sigmaRatio,
+              wickRatio: volatilityCheck.wickRatio,
+            },
+          });
+          
+          await storage.addTradeLog({
+            type: "warning",
+            message: `[${modeLabel}] VOLATILITY GUARD closed ${closeResult.closedCount} positions on ${symbol}: ${volatilityCheck.reason}`,
+            data: {
+              sessionId,
+              closedCount: closeResult.closedCount,
+              totalPnl: closeResult.totalPnl,
+              atrRatio: volatilityCheck.atrRatio,
+              sigmaRatio: volatilityCheck.sigmaRatio,
+              wickRatio: volatilityCheck.wickRatio,
+            },
+          });
+          
+          instance.totalTrades += closeResult.closedCount;
+        }
+        
+        // Don't process any new trades during critical volatility
+        return;
+      }
+
+      // Check stop conditions on logical positions via PositionBroker
       const triggeredStops = await broker.checkStopConditions(ticker.lastPrice);
       
       for (const stop of triggeredStops) {
@@ -474,19 +545,20 @@ class StrategyOrchestrator {
                             stop.trigger === "stop_loss" ? "STOP LOSS" : "TRAILING STOP";
         
         await notificationService.notify({
-          type: stop.trigger as any,
+          type: stop.trigger === "stop_loss" ? "stop_loss" : "take_profit",
+          title: `${triggerLabel} Triggered`,
           message: `[${modeLabel}] ${triggerLabel} triggered for ${symbol}: ROI ${stop.roi.toFixed(2)}%, PnL ${result.pnl.toFixed(4)} USDT`,
+          exchange,
+          symbol,
+          pnl: result.pnl,
           data: {
-            exchange,
-            symbol,
             trigger: stop.trigger,
             roi: stop.roi,
-            pnl: result.pnl,
           },
         });
         
         await storage.addTradeLog({
-          type: "stop",
+          type: "signal",
           message: `[${modeLabel}] ${triggerLabel} closed ${stop.position.side} ${symbol}: ROI=${stop.roi.toFixed(2)}%, PnL=${result.pnl.toFixed(4)} USDT`,
           data: { 
             sessionId, 
@@ -1216,9 +1288,9 @@ class StrategyOrchestrator {
           entryPrice: ticker.lastPrice,
           leverage: effectiveLeverage,
           allocatedMargin: positionSize / effectiveLeverage,
-          takeProfitPercent: riskManagement.takeProfit || undefined,
-          stopLossPercent: riskManagement.stopLoss || undefined,
-          trailingStopPercent: riskManagement.trailingStop || undefined,
+          takeProfitPercent: riskManagement.takeProfitPercent || undefined,
+          stopLossPercent: riskManagement.stopLossPercent || undefined,
+          trailingStopPercent: riskManagement.trailingStop ? riskManagement.trailingStopPercent : undefined,
           exchangePositionId: positionId,
         });
         
