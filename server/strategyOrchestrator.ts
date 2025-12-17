@@ -13,6 +13,7 @@ import { storage } from "./storage";
 import { exchangeService } from "./exchangeService";
 import { notificationService } from "./notificationService";
 import { strategyOptimizer } from "./strategyOptimizer";
+import { getPositionBroker } from "./positionBroker";
 import { randomUUID } from "crypto";
 
 // Type for compound condition AST nodes
@@ -310,6 +311,14 @@ class StrategyOrchestrator {
     const positions = await storage.getPositions(instance.exchange);
     const symbolPositions = positions.filter(p => p.symbol === instance.symbol);
 
+    // Get current price for PnL calculation
+    const tickerResult = await exchangeService.getTicker(instance.exchange, instance.symbol);
+    const currentPrice = tickerResult.ticker?.lastPrice ?? 0;
+
+    // Close logical positions through PositionBroker
+    const broker = getPositionBroker(instance.exchange, instance.symbol);
+    const logicalPnl = await broker.closeAllPositions(sessionId, currentPrice, "manual_close_all");
+
     for (const position of symbolPositions) {
       await exchangeService.closePosition(instance.exchange, credentials, position.id);
       await storage.deletePosition(instance.exchange, position.id);
@@ -320,8 +329,8 @@ class StrategyOrchestrator {
 
     await storage.addTradeLog({
       type: "position",
-      message: `[${modeLabel}] Closed ${symbolPositions.length} positions for ${instance.symbol}`,
-      data: { sessionId, positionsClosed: symbolPositions.length },
+      message: `[${modeLabel}] Closed ${symbolPositions.length} positions for ${instance.symbol}, logical PnL: ${logicalPnl.toFixed(4)} USDT`,
+      data: { sessionId, positionsClosed: symbolPositions.length, logicalPnl },
     });
 
     await this.stopStrategy(sessionId);
@@ -435,6 +444,62 @@ class StrategyOrchestrator {
       const symbolPositions = positions.filter(p => p.symbol === symbol);
       
       await storage.setTicker(exchange, symbol, ticker);
+
+      // Check stop conditions on logical positions via PositionBroker
+      const broker = getPositionBroker(exchange, symbol);
+      const triggeredStops = await broker.checkStopConditions(ticker.lastPrice);
+      
+      for (const stop of triggeredStops) {
+        const modeLabel = executionMode === "paper" ? "PAPER" : "REAL";
+        
+        // Close the logical position
+        const result = await broker.closePosition({
+          logicalPositionId: stop.position.id,
+          exitPrice: ticker.lastPrice,
+          reason: stop.trigger,
+        });
+        
+        // Close the linked exchange position using stored exchangePositionId
+        if (stop.position.exchangePositionId) {
+          const matchingExchangePos = symbolPositions.find(p => 
+            p.id === stop.position.exchangePositionId
+          );
+          if (matchingExchangePos) {
+            await exchangeService.closePosition(exchange, credentials, matchingExchangePos.id);
+            await storage.deletePosition(exchange, matchingExchangePos.id);
+          }
+        }
+        
+        const triggerLabel = stop.trigger === "take_profit" ? "TAKE PROFIT" : 
+                            stop.trigger === "stop_loss" ? "STOP LOSS" : "TRAILING STOP";
+        
+        await notificationService.notify({
+          type: stop.trigger as any,
+          message: `[${modeLabel}] ${triggerLabel} triggered for ${symbol}: ROI ${stop.roi.toFixed(2)}%, PnL ${result.pnl.toFixed(4)} USDT`,
+          data: {
+            exchange,
+            symbol,
+            trigger: stop.trigger,
+            roi: stop.roi,
+            pnl: result.pnl,
+          },
+        });
+        
+        await storage.addTradeLog({
+          type: "stop",
+          message: `[${modeLabel}] ${triggerLabel} closed ${stop.position.side} ${symbol}: ROI=${stop.roi.toFixed(2)}%, PnL=${result.pnl.toFixed(4)} USDT`,
+          data: { 
+            sessionId, 
+            logicalPositionId: stop.position.id,
+            trigger: stop.trigger,
+            roi: stop.roi,
+            pnl: result.pnl,
+          },
+        });
+        
+        instance.totalTrades++;
+        this.recordTradeExecution(instance);
+      }
 
       const decision = await this.evaluateRules(
         algorithm.rules, 
@@ -1138,6 +1203,25 @@ class StrategyOrchestrator {
 
         await storage.updatePosition(exchange, position as any);
         
+        // Create logical position via PositionBroker for shadow tracking
+        // Pass exchangePositionId at creation time to ensure proper linking
+        const broker = getPositionBroker(exchange, symbol);
+        const logicalPosition = await broker.openPosition({
+          sessionId: instance.sessionId,
+          algorithmId: algorithm.id,
+          exchange,
+          symbol,
+          side: position.side as "long" | "short",
+          quantity,
+          entryPrice: ticker.lastPrice,
+          leverage: effectiveLeverage,
+          allocatedMargin: positionSize / effectiveLeverage,
+          takeProfitPercent: riskManagement.takeProfit || undefined,
+          stopLossPercent: riskManagement.stopLoss || undefined,
+          trailingStopPercent: riskManagement.trailingStop || undefined,
+          exchangePositionId: positionId,
+        });
+        
         // Record trade execution for frequency control
         this.recordTradeExecution(instance, positionId);
         
@@ -1158,6 +1242,7 @@ class StrategyOrchestrator {
           data: {
             sessionId: instance.sessionId,
             positionId: position.id,
+            logicalPositionId: logicalPosition.id,
             side: position.side,
             quantity,
             entryPrice: ticker.lastPrice,

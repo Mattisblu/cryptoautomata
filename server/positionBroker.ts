@@ -20,6 +20,7 @@ interface OpenPositionParams {
   takeProfitPercent?: number;
   stopLossPercent?: number;
   trailingStopPercent?: number;
+  exchangePositionId?: string;
   metadata?: Record<string, any>;
 }
 
@@ -87,7 +88,7 @@ export class PositionBroker {
       closeReason: null,
       openedAt: now,
       closedAt: null,
-      exchangePositionId: null,
+      exchangePositionId: params.exchangePositionId ?? null,
     };
 
     const created = await storage.createLogicalPosition(logicalPosition);

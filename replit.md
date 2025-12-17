@@ -8,6 +8,13 @@ A professional AI-powered cryptocurrency futures trading application with automa
 - **Last Updated**: December 2024
 
 ## Recent Changes
+- **Position Broker Pattern**: Tracks individual trades when exchanges aggregate positions
+  - `positionBroker.ts` manages logical positions separate from exchange's aggregated view
+  - New database tables: `logical_positions`, `fills`, `position_reconciliation`
+  - ROI-based TP/SL calculation: `ROI = price_change_% × leverage`
+  - Each logical position linked to exchange position via `exchangePositionId`
+  - Trailing stop support with high-water-mark tracking
+  - StrategyOrchestrator integration for automatic stop condition checking
 - **Scalping Frequency Controls**: New trade frequency limits for scalping strategies
   - `tradeCooldownSeconds`: Wait time after closing before next trade (default: disabled)
   - `maxTradesPerHour`: Hard cap on trades per hour (default: disabled)
@@ -116,6 +123,7 @@ server/
 ├── tradingBot.ts      # Automated trading logic with optimization integration
 ├── strategyOrchestrator.ts # Multi-strategy management, runs multiple bot instances
 ├── strategyOptimizer.ts # Live strategy monitoring and AI-powered optimization
+├── positionBroker.ts  # Position Broker - tracks logical positions separate from exchange aggregation
 └── notificationService.ts  # Real-time notification dispatch
 shared/
 └── schema.ts          # Type definitions + Drizzle table schemas
