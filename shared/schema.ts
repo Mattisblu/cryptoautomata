@@ -219,6 +219,73 @@ export const liveStopOrders = pgTable("live_stop_orders", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ============ POSITION BROKER TABLES ============
+// These tables enable shadow position tracking when exchanges (like Bitunix) 
+// aggregate multiple trades into a single combined position
+
+// Logical Positions - tracks individual trade intents separate from exchange's aggregated view
+export const logicalPositions = pgTable("logical_positions", {
+  id: text("id").primaryKey(), // Unique logical position ID (UUID)
+  sessionId: text("session_id").notNull(), // Strategy session that owns this position
+  algorithmId: text("algorithm_id").notNull(), // Algorithm that created this position
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  side: text("side").notNull(), // "long" or "short"
+  entryPrice: real("entry_price").notNull(), // Average entry price for this logical position
+  quantity: real("quantity").notNull(), // Size of this logical position
+  remainingQuantity: real("remaining_quantity").notNull(), // How much is still open
+  leverage: integer("leverage").notNull().default(1),
+  allocatedMargin: real("allocated_margin").notNull(), // Margin assigned to this position
+  stopLossPercent: real("stop_loss_percent"), // ROI-based SL target
+  takeProfitPercent: real("take_profit_percent"), // ROI-based TP target
+  trailingStopPercent: real("trailing_stop_percent"), // ROI-based trailing stop
+  status: text("status").notNull().default("open"), // "open", "partial", "closed", "liquidated"
+  realizedPnl: real("realized_pnl").notNull().default(0),
+  fees: real("fees").notNull().default(0),
+  openedAt: timestamp("opened_at").notNull().defaultNow(),
+  closedAt: timestamp("closed_at"),
+  closeReason: text("close_reason"), // "manual", "stop_loss", "take_profit", "trailing_stop", "liquidation"
+  exchangePositionId: text("exchange_position_id"), // Reference to exchange's aggregated position
+});
+
+// Fills - tracks individual order fills that contribute to logical positions
+export const fills = pgTable("fills", {
+  id: serial("id").primaryKey(),
+  logicalPositionId: text("logical_position_id").notNull(), // Parent logical position
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  orderId: text("order_id"), // Exchange order ID if available
+  side: text("side").notNull(), // "buy" or "sell"
+  fillType: text("fill_type").notNull(), // "entry" or "exit"
+  price: real("price").notNull(),
+  quantity: real("quantity").notNull(),
+  fee: real("fee").notNull().default(0),
+  feeAsset: text("fee_asset"), // Asset the fee was paid in
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+});
+
+// Position Reconciliation - snapshots for comparing local vs exchange state
+export const positionReconciliation = pgTable("position_reconciliation", {
+  id: serial("id").primaryKey(),
+  exchange: text("exchange").notNull(),
+  symbol: text("symbol").notNull(),
+  // Local aggregate (sum of logical positions)
+  localQuantity: real("local_quantity").notNull(),
+  localAvgEntryPrice: real("local_avg_entry_price").notNull(),
+  localSide: text("local_side"), // "long", "short", or null if flat
+  // Exchange reported position
+  exchangeQuantity: real("exchange_quantity").notNull(),
+  exchangeAvgEntryPrice: real("exchange_avg_entry_price").notNull(),
+  exchangeSide: text("exchange_side"), // "long", "short", or null if flat
+  // Drift detection
+  quantityDrift: real("quantity_drift").notNull().default(0), // exchange - local
+  priceDrift: real("price_drift").notNull().default(0), // exchange - local
+  hasDrift: boolean("has_drift").notNull().default(false),
+  driftResolved: boolean("drift_resolved").notNull().default(false),
+  resolutionNote: text("resolution_note"),
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+});
+
 // Relations
 export const tradesRelations = relations(trades, ({ }) => ({}));
 export const dailySummariesRelations = relations(dailySummaries, ({ }) => ({}));
@@ -232,6 +299,9 @@ export const abTestsRelations = relations(abTests, ({ }) => ({}));
 export const notificationsRelations = relations(notifications, ({ }) => ({}));
 export const notificationSettingsRelations = relations(notificationSettings, ({ }) => ({}));
 export const runningStrategiesRelations = relations(runningStrategies, ({ }) => ({}));
+export const logicalPositionsRelations = relations(logicalPositions, ({ }) => ({}));
+export const fillsRelations = relations(fills, ({ }) => ({}));
+export const positionReconciliationRelations = relations(positionReconciliation, ({ }) => ({}));
 
 // Insert schemas
 export const insertTradeSchema = createInsertSchema(trades).omit({ id: true });
@@ -269,6 +339,23 @@ export type RunningStrategy = typeof runningStrategies.$inferSelect;
 export const insertAlgorithmDbSchema = createInsertSchema(algorithms);
 export type InsertAlgorithmDb = z.infer<typeof insertAlgorithmDbSchema>;
 export type AlgorithmDb = typeof algorithms.$inferSelect;
+
+// Position Broker insert schemas
+export const insertLogicalPositionSchema = createInsertSchema(logicalPositions);
+export type InsertLogicalPosition = z.infer<typeof insertLogicalPositionSchema>;
+export type LogicalPosition = typeof logicalPositions.$inferSelect;
+
+export const insertFillSchema = createInsertSchema(fills).omit({ id: true });
+export type InsertFill = z.infer<typeof insertFillSchema>;
+export type Fill = typeof fills.$inferSelect;
+
+export const insertPositionReconciliationSchema = createInsertSchema(positionReconciliation).omit({ id: true });
+export type InsertPositionReconciliation = z.infer<typeof insertPositionReconciliationSchema>;
+export type PositionReconciliation = typeof positionReconciliation.$inferSelect;
+
+// Logical position statuses
+export const logicalPositionStatuses = ["open", "partial", "closed", "liquidated"] as const;
+export type LogicalPositionStatus = typeof logicalPositionStatuses[number];
 
 // Running strategy status type
 export const runningStrategyStatuses = ["running", "paused", "stopped", "error"] as const;
