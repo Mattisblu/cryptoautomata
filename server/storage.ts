@@ -29,8 +29,14 @@ import type {
   RunningStrategy,
   InsertRunningStrategy,
   RunningStrategyStatus,
+  LogicalPosition,
+  InsertLogicalPosition,
+  Fill,
+  InsertFill,
+  PositionReconciliation,
+  InsertPositionReconciliation,
 } from "@shared/schema";
-import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies, algorithms, livePositions, liveOrders, liveStopOrders } from "@shared/schema";
+import { trades, dailySummaries, algorithmPerformance, algorithmVersions, abTests, notifications, notificationSettings, runningStrategies, algorithms, livePositions, liveOrders, liveStopOrders, logicalPositions, fills, positionReconciliation } from "@shared/schema";
 import type { PositionSide, OrderType, OrderSide, OrderStatus } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
@@ -162,6 +168,25 @@ export interface IStorage {
   stopRunningStrategy(sessionId: string, errorMessage?: string): Promise<void>;
   updateRunningStrategyHeartbeat(sessionId: string): Promise<void>;
   cleanupStaleStrategies(maxAgeMs?: number): Promise<void>;
+
+  // Logical Positions (Position Broker)
+  createLogicalPosition(position: InsertLogicalPosition): Promise<LogicalPosition>;
+  getLogicalPositions(options?: { sessionId?: string; exchange?: string; symbol?: string; status?: string }): Promise<LogicalPosition[]>;
+  getLogicalPosition(id: string): Promise<LogicalPosition | null>;
+  getOpenLogicalPositions(exchange: string, symbol: string): Promise<LogicalPosition[]>;
+  updateLogicalPosition(id: string, updates: Partial<LogicalPosition>): Promise<LogicalPosition | null>;
+  closeLogicalPosition(id: string, pnl: number, reason: string): Promise<void>;
+
+  // Fills (Position Broker)
+  createFill(fill: InsertFill): Promise<Fill>;
+  getFillsByLogicalPosition(logicalPositionId: string): Promise<Fill[]>;
+  getFills(options?: { exchange?: string; symbol?: string; limit?: number }): Promise<Fill[]>;
+
+  // Position Reconciliation
+  createReconciliationSnapshot(snapshot: InsertPositionReconciliation): Promise<PositionReconciliation>;
+  getReconciliationSnapshots(exchange: string, symbol: string, limit?: number): Promise<PositionReconciliation[]>;
+  getUnresolvedDrifts(): Promise<PositionReconciliation[]>;
+  resolveDrift(id: number, resolutionNote: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -1003,6 +1028,169 @@ export class MemStorage implements IStorage {
           lte(runningStrategies.lastHeartbeat, cutoffTime)
         )
       );
+  }
+
+  // ============ LOGICAL POSITIONS (Position Broker) ============
+
+  async createLogicalPosition(position: InsertLogicalPosition): Promise<LogicalPosition> {
+    const [created] = await db
+      .insert(logicalPositions)
+      .values(position)
+      .returning();
+    return created;
+  }
+
+  async getLogicalPositions(options?: { sessionId?: string; exchange?: string; symbol?: string; status?: string }): Promise<LogicalPosition[]> {
+    const conditions = [];
+    if (options?.sessionId) {
+      conditions.push(eq(logicalPositions.sessionId, options.sessionId));
+    }
+    if (options?.exchange) {
+      conditions.push(eq(logicalPositions.exchange, options.exchange));
+    }
+    if (options?.symbol) {
+      conditions.push(eq(logicalPositions.symbol, options.symbol));
+    }
+    if (options?.status) {
+      conditions.push(eq(logicalPositions.status, options.status));
+    }
+
+    let query = db.select().from(logicalPositions);
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as typeof query;
+    }
+    return query.orderBy(desc(logicalPositions.openedAt));
+  }
+
+  async getLogicalPosition(id: string): Promise<LogicalPosition | null> {
+    const [position] = await db
+      .select()
+      .from(logicalPositions)
+      .where(eq(logicalPositions.id, id))
+      .limit(1);
+    return position || null;
+  }
+
+  async getOpenLogicalPositions(exchange: string, symbol: string): Promise<LogicalPosition[]> {
+    return db
+      .select()
+      .from(logicalPositions)
+      .where(
+        and(
+          eq(logicalPositions.exchange, exchange),
+          eq(logicalPositions.symbol, symbol),
+          eq(logicalPositions.status, "open")
+        )
+      )
+      .orderBy(desc(logicalPositions.openedAt));
+  }
+
+  async updateLogicalPosition(id: string, updates: Partial<LogicalPosition>): Promise<LogicalPosition | null> {
+    const [updated] = await db
+      .update(logicalPositions)
+      .set(updates)
+      .where(eq(logicalPositions.id, id))
+      .returning();
+    return updated || null;
+  }
+
+  async closeLogicalPosition(id: string, pnl: number, reason: string): Promise<void> {
+    await db
+      .update(logicalPositions)
+      .set({
+        status: "closed",
+        realizedPnl: pnl,
+        closeReason: reason,
+        closedAt: new Date(),
+        remainingQuantity: 0,
+      })
+      .where(eq(logicalPositions.id, id));
+  }
+
+  // ============ FILLS (Position Broker) ============
+
+  async createFill(fill: InsertFill): Promise<Fill> {
+    const [created] = await db
+      .insert(fills)
+      .values(fill)
+      .returning();
+    return created;
+  }
+
+  async getFillsByLogicalPosition(logicalPositionId: string): Promise<Fill[]> {
+    return db
+      .select()
+      .from(fills)
+      .where(eq(fills.logicalPositionId, logicalPositionId))
+      .orderBy(desc(fills.timestamp));
+  }
+
+  async getFills(options?: { exchange?: string; symbol?: string; limit?: number }): Promise<Fill[]> {
+    const conditions = [];
+    if (options?.exchange) {
+      conditions.push(eq(fills.exchange, options.exchange));
+    }
+    if (options?.symbol) {
+      conditions.push(eq(fills.symbol, options.symbol));
+    }
+
+    let query = db.select().from(fills);
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as typeof query;
+    }
+    
+    if (options?.limit) {
+      query = query.limit(options.limit) as typeof query;
+    }
+    
+    return query.orderBy(desc(fills.timestamp));
+  }
+
+  // ============ POSITION RECONCILIATION ============
+
+  async createReconciliationSnapshot(snapshot: InsertPositionReconciliation): Promise<PositionReconciliation> {
+    const [created] = await db
+      .insert(positionReconciliation)
+      .values(snapshot)
+      .returning();
+    return created;
+  }
+
+  async getReconciliationSnapshots(exchange: string, symbol: string, limit: number = 10): Promise<PositionReconciliation[]> {
+    return db
+      .select()
+      .from(positionReconciliation)
+      .where(
+        and(
+          eq(positionReconciliation.exchange, exchange),
+          eq(positionReconciliation.symbol, symbol)
+        )
+      )
+      .orderBy(desc(positionReconciliation.timestamp))
+      .limit(limit);
+  }
+
+  async getUnresolvedDrifts(): Promise<PositionReconciliation[]> {
+    return db
+      .select()
+      .from(positionReconciliation)
+      .where(
+        and(
+          eq(positionReconciliation.hasDrift, true),
+          eq(positionReconciliation.driftResolved, false)
+        )
+      )
+      .orderBy(desc(positionReconciliation.timestamp));
+  }
+
+  async resolveDrift(id: number, resolutionNote: string): Promise<void> {
+    await db
+      .update(positionReconciliation)
+      .set({
+        driftResolved: true,
+        resolutionNote,
+      })
+      .where(eq(positionReconciliation.id, id));
   }
 }
 
