@@ -550,6 +550,22 @@ export const defaultVolatilityGuardConfig: VolatilityGuardConfig = {
   cooldownMs: 60000,
 };
 
+// Asset Guard Rule - Portfolio-level rule for margin reallocation
+export interface AssetGuardRule {
+  enabled: boolean;
+  assetThreshold: number;       // Trigger when available assets fall below this (e.g., $5)
+  sellFraction: number;         // Fraction of margin to sell (e.g., 0.33 for 33%)
+  cooldownMs: number;           // Cooldown between triggers (default: 60000ms)
+  lastTriggered?: number;       // Timestamp of last trigger (runtime state)
+}
+
+export const defaultAssetGuardRule: AssetGuardRule = {
+  enabled: false,
+  assetThreshold: 5,            // Default: $5
+  sellFraction: 0.33,           // Default: 33%
+  cooldownMs: 60000,            // Default: 1 minute cooldown
+};
+
 export interface RiskManagement {
   maxPositionSize: number;
   maxLeverage: number;
@@ -568,6 +584,8 @@ export interface RiskManagement {
   maxConcurrentPositions?: number | null;  // Limit open positions at once
   // Volatility protection
   volatilityGuard?: VolatilityGuardConfig;
+  // Asset guard for margin reallocation
+  assetGuard?: AssetGuardRule;
 }
 
 // Volatility guard schema for UI
@@ -579,6 +597,14 @@ export const volatilityGuardSchema = z.object({
   sigmaMultiplier: z.number().min(1.5).max(10).default(2.5),
   wickRatioThreshold: z.number().min(0.3).max(0.9).default(0.6),
   barPersistence: z.number().min(1).max(10).default(2),
+  cooldownMs: z.number().min(10000).max(600000).default(60000),
+});
+
+// Asset guard schema for AI-parsed portfolio rules
+export const assetGuardSchema = z.object({
+  enabled: z.boolean().default(false),
+  assetThreshold: z.number().min(0.1).max(10000).default(5),
+  sellFraction: z.number().min(0.1).max(0.9).default(0.33),
   cooldownMs: z.number().min(10000).max(600000).default(60000),
 });
 
@@ -601,6 +627,8 @@ export const riskParametersSchema = z.object({
   maxConcurrentPositions: z.number().min(1).max(10).nullable().optional(),
   // Volatility protection
   volatilityGuard: volatilityGuardSchema.optional(),
+  // Asset guard for margin reallocation
+  assetGuard: assetGuardSchema.optional(),
 });
 
 export type RiskParameters = z.infer<typeof riskParametersSchema>;

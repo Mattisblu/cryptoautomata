@@ -112,6 +112,15 @@ EXIT CONDITIONS (for "close" action):
 - "price increases X%" - same as take profit
 - "price decreases X%" - same as stop loss
 
+ASSET GUARD / PORTFOLIO RULES (for margin reallocation):
+- "sell X% margin if assets below $Y" - sell X% of margin when available balance falls below $Y
+- "asset guard $Y sell X%" - same as above
+- "reallocate X% if balance under $Y" - same as above
+This creates an assetGuard in riskManagement with:
+- sellFraction: X/100 (e.g., 33% = 0.33)
+- assetThreshold: Y (e.g., $5 = 5)
+- enabled: true
+
 COMPOUND LOGIC (combine conditions):
 - "A AND B" - both must be true
 - "A OR B" - either triggers
@@ -156,7 +165,13 @@ Before providing the JSON, check:
     "takeProfitPercent": USE_USER_VALUE_OR_NULL,
     "maxDailyLoss": USE_USER_VALUE,
     "trailingStop": USE_USER_VALUE,
-    "trailingStopPercent": USE_USER_VALUE_OR_NULL
+    "trailingStopPercent": USE_USER_VALUE_OR_NULL,
+    "assetGuard": {
+      "enabled": true|false,
+      "assetThreshold": DOLLAR_THRESHOLD,
+      "sellFraction": FRACTION_0_TO_1,
+      "cooldownMs": 60000
+    }
   },
   "status": "active"
 }
@@ -203,6 +218,28 @@ Correct response:
   ],
   "riskManagement": {
     "takeProfitPercent": 3
+  }
+}
+\`\`\`
+
+User: "immediate entry with 5% TP, 3% SL, and sell 33% of margin if assets drop below $5"
+Correct response:
+\`\`\`json
+{
+  "rules": [
+    {"condition": "immediate", "action": "buy", "priority": 1},
+    {"condition": "take profit 5%", "action": "close", "priority": 2},
+    {"condition": "stop loss 3%", "action": "close", "priority": 3}
+  ],
+  "riskManagement": {
+    "takeProfitPercent": 5,
+    "stopLossPercent": 3,
+    "assetGuard": {
+      "enabled": true,
+      "assetThreshold": 5,
+      "sellFraction": 0.33,
+      "cooldownMs": 60000
+    }
   }
 }
 \`\`\`
