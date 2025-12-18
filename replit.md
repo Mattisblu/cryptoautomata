@@ -26,6 +26,7 @@ The AI Crypto Trading Terminal is a professional, AI-powered cryptocurrency futu
     - `StrategyOrchestrator`: Manages multiple trading algorithms concurrently, each with independent state via unique `sessionId`.
     - `positionBroker.ts`: Manages logical positions, supporting individual trade tracking, ROI-based TP/SL, and trailing stops, especially for exchanges aggregating positions.
     - `volatilityGuard.ts`: Monitors market volatility using ATR, Sigma, and Wick ratios, automatically closing positions upon detecting erratic price movements.
+    - Asset Guard: Monitors available balance and automatically closes a fraction (default 33%) of largest positions when balance falls below threshold (default $5), enabling automatic hedging when trends reverse. Configurable via AI chatbot prompts like "sell 33% of margin if assets below $5".
     - Scalping Frequency Controls: Implements `tradeCooldownSeconds`, `maxTradesPerHour`, `minHoldTimeSeconds`, and `maxConcurrentPositions` for fine-grained control over high-frequency strategies.
     - User-selectable timeframe for bots (e.g., 1m, 5m, 15m).
     - Per-Request Data Source Tracking: Eliminates race conditions by embedding `dataSource` and `dataError` directly into service function results.

@@ -65,6 +65,8 @@ interface StartStrategyConfig {
 class StrategyOrchestrator {
   private bots: Map<string, BotInstance> = new Map();
   private heartbeatInterval: NodeJS.Timeout | null = null;
+  // Track asset guard cooldowns per session to prevent repeated triggering
+  private assetGuardCooldowns: Map<string, number> = new Map();
 
   constructor() {
     this.startHeartbeat();
@@ -290,6 +292,9 @@ class StrategyOrchestrator {
       },
     });
 
+    // Clean up asset guard cooldown tracking
+    this.assetGuardCooldowns.delete(sessionId);
+    
     this.bots.delete(sessionId);
   }
 
@@ -582,8 +587,9 @@ class StrategyOrchestrator {
         const availableBalance = balanceResult.available;
         
         // Check if we're below threshold and cooldown has expired
+        // Use orchestrator-level cooldown tracking (not schema config) for persistence
         const now = Date.now();
-        const lastTriggered = assetGuardConfig.lastTriggered || 0;
+        const lastTriggered = this.assetGuardCooldowns.get(sessionId) || 0;
         const cooldownExpired = now - lastTriggered > assetGuardConfig.cooldownMs;
         
         if (availableBalance < assetGuardConfig.assetThreshold && cooldownExpired) {
@@ -632,8 +638,8 @@ class StrategyOrchestrator {
             }
             
             if (closedCount > 0) {
-              // Update the lastTriggered timestamp (we can't modify riskManagement directly, but we track it)
-              assetGuardConfig.lastTriggered = now;
+              // Update the lastTriggered timestamp in orchestrator-level tracking
+              this.assetGuardCooldowns.set(sessionId, now);
               
               await notificationService.notify({
                 type: "info",
