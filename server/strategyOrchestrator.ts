@@ -8,11 +8,12 @@ import type {
   RunningStrategy,
   RiskManagement,
   Position,
-  VolatilityGuardConfig 
+  VolatilityGuardConfig,
+  AssetGuardRule 
 } from "@shared/schema";
-import { defaultVolatilityGuardConfig } from "@shared/schema";
+import { defaultVolatilityGuardConfig, defaultAssetGuardRule } from "@shared/schema";
 import { storage } from "./storage";
-import { exchangeService } from "./exchangeService";
+import { exchangeService, getAvailableBalance } from "./exchangeService";
 import { notificationService } from "./notificationService";
 import { strategyOptimizer } from "./strategyOptimizer";
 import { getPositionBroker } from "./positionBroker";
@@ -571,6 +572,100 @@ class StrategyOrchestrator {
         
         instance.totalTrades++;
         this.recordTradeExecution(instance);
+      }
+
+      // === ASSET GUARD CHECK ===
+      // Check if available balance is below threshold, sell portion of margin to reallocate funds
+      const assetGuardConfig = riskManagement.assetGuard ?? defaultAssetGuardRule;
+      if (assetGuardConfig.enabled) {
+        const balanceResult = await getAvailableBalance(exchange, credentials, executionMode);
+        const availableBalance = balanceResult.available;
+        
+        // Check if we're below threshold and cooldown has expired
+        const now = Date.now();
+        const lastTriggered = assetGuardConfig.lastTriggered || 0;
+        const cooldownExpired = now - lastTriggered > assetGuardConfig.cooldownMs;
+        
+        if (availableBalance < assetGuardConfig.assetThreshold && cooldownExpired) {
+          const modeLabel = executionMode === "paper" ? "PAPER" : "REAL";
+          const sellFraction = assetGuardConfig.sellFraction || 0.33;
+          
+          console.log(`[AssetGuard] Available balance $${availableBalance.toFixed(2)} below threshold $${assetGuardConfig.assetThreshold}. Selling ${(sellFraction * 100).toFixed(0)}% of margin.`);
+          
+          // Get open positions sorted by margin size (largest first)
+          const openPositions = await broker.getOpenPositions();
+          if (openPositions.length > 0) {
+            // Calculate how many positions to close (sell fraction of total margin)
+            const positionsToClose = Math.max(1, Math.ceil(openPositions.length * sellFraction));
+            
+            // Sort by notional value (largest first)
+            const sortedPositions = [...openPositions].sort((a, b) => {
+              const notionalA = a.entryPrice * a.quantity;
+              const notionalB = b.entryPrice * b.quantity;
+              return notionalB - notionalA;
+            });
+            
+            let closedCount = 0;
+            let totalPnl = 0;
+            
+            for (let i = 0; i < positionsToClose && i < sortedPositions.length; i++) {
+              const pos = sortedPositions[i];
+              
+              // Close the logical position
+              const closeResult = await broker.closePosition({
+                logicalPositionId: pos.id,
+                exitPrice: ticker.lastPrice,
+                reason: "asset_guard",
+              });
+              
+              // Close linked exchange position
+              if (pos.exchangePositionId) {
+                const matchingExchangePos = symbolPositions.find(p => p.id === pos.exchangePositionId);
+                if (matchingExchangePos) {
+                  await exchangeService.closePosition(exchange, credentials, matchingExchangePos.id);
+                  await storage.deletePosition(exchange, matchingExchangePos.id);
+                }
+              }
+              
+              closedCount++;
+              totalPnl += closeResult.pnl;
+            }
+            
+            if (closedCount > 0) {
+              // Update the lastTriggered timestamp (we can't modify riskManagement directly, but we track it)
+              assetGuardConfig.lastTriggered = now;
+              
+              await notificationService.notify({
+                type: "info",
+                title: "Asset Guard Triggered",
+                message: `[${modeLabel}] ASSET GUARD reallocated margin by closing ${closedCount} positions on ${symbol}. Balance was $${availableBalance.toFixed(2)}. PnL: ${totalPnl.toFixed(4)} USDT.`,
+                exchange,
+                symbol,
+                pnl: totalPnl,
+                data: {
+                  availableBalance,
+                  threshold: assetGuardConfig.assetThreshold,
+                  sellFraction,
+                  closedCount,
+                },
+              });
+              
+              await storage.addTradeLog({
+                type: "warning",
+                message: `[${modeLabel}] ASSET GUARD closed ${closedCount} positions to reallocate margin. Balance: $${availableBalance.toFixed(2)} < $${assetGuardConfig.assetThreshold} threshold.`,
+                data: {
+                  sessionId,
+                  closedCount,
+                  totalPnl,
+                  availableBalance,
+                  threshold: assetGuardConfig.assetThreshold,
+                },
+              });
+              
+              instance.totalTrades += closedCount;
+            }
+          }
+        }
       }
 
       const decision = await this.evaluateRules(
