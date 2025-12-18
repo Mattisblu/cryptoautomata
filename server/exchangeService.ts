@@ -12,8 +12,10 @@ import {
   getBitunixPositions,
   cancelBitunixOrder,
   closeBitunixPosition,
+  getBitunixBalance,
   type PlaceOrderParams,
   type BitunixPosition,
+  type ExchangeBalance,
 } from "./bitunixApi";
 import { getToobitMarkets, getToobitTicker, getToobitKlines, validateToobitCredentials } from "./toobitApi";
 
@@ -1107,4 +1109,110 @@ export function updatePositionPrices(exchange: Exchange, credentials: ApiCredent
   }
   
   simulatedPositions.set(key, positions);
+}
+
+// Balance result type
+export interface BalanceResult {
+  available: number;
+  frozen: number;
+  total: number;
+  marginBalance: number;
+  unrealizedPnl: number;
+  dataSource: "live" | "simulated";
+  dataError?: string;
+}
+
+// Simulated balance for paper trading
+const simulatedBalances = new Map<string, { available: number; total: number }>();
+
+// Get available balance for an exchange
+export async function getAvailableBalance(
+  exchange: Exchange,
+  credentials: ApiCredentials,
+  executionMode: "paper" | "real" = "paper"
+): Promise<BalanceResult> {
+  const key = getStorageKey(exchange, credentials.apiKey);
+  
+  // Paper trading - return simulated balance
+  if (executionMode === "paper") {
+    let balance = simulatedBalances.get(key);
+    if (!balance) {
+      balance = { available: 1000, total: 1000 }; // Default $1000 paper balance
+      simulatedBalances.set(key, balance);
+    }
+    
+    // Calculate used margin from open positions
+    const positions = simulatedPositions.get(key) || [];
+    let usedMargin = 0;
+    let unrealizedPnl = 0;
+    for (const pos of positions) {
+      // Margin = notional value / leverage = (entryPrice * quantity) / leverage
+      const notionalValue = pos.entryPrice * pos.quantity;
+      usedMargin += notionalValue / (pos.leverage || 1);
+      unrealizedPnl += pos.unrealizedPnl || 0;
+    }
+    
+    return {
+      available: Math.max(0, balance.total - usedMargin + unrealizedPnl),
+      frozen: usedMargin,
+      total: balance.total + unrealizedPnl,
+      marginBalance: balance.total + unrealizedPnl,
+      unrealizedPnl,
+      dataSource: "simulated",
+    };
+  }
+  
+  // Real trading - fetch from exchange
+  if (exchange === "bitunix" && USE_LIVE_API) {
+    const result = await getBitunixBalance(credentials);
+    if (result.success && result.data && result.data.length > 0) {
+      const bal = result.data[0]; // USDT balance
+      return {
+        available: bal.available,
+        frozen: bal.frozen,
+        total: bal.total,
+        marginBalance: bal.marginBalance,
+        unrealizedPnl: bal.unrealizedPnl,
+        dataSource: "live",
+      };
+    } else {
+      // Fallback to simulated if API fails
+      return {
+        available: 0,
+        frozen: 0,
+        total: 0,
+        marginBalance: 0,
+        unrealizedPnl: 0,
+        dataSource: "simulated",
+        dataError: result.error || "Failed to fetch balance",
+      };
+    }
+  }
+  
+  // Other exchanges - return simulated for now
+  return {
+    available: 1000,
+    frozen: 0,
+    total: 1000,
+    marginBalance: 1000,
+    unrealizedPnl: 0,
+    dataSource: "simulated",
+    dataError: `Balance API not implemented for ${exchange}`,
+  };
+}
+
+// Update simulated balance (for paper trading deductions/additions)
+export function updateSimulatedBalance(
+  exchange: Exchange,
+  apiKey: string,
+  delta: number
+): void {
+  const key = getStorageKey(exchange, apiKey);
+  let balance = simulatedBalances.get(key);
+  if (!balance) {
+    balance = { available: 1000, total: 1000 };
+  }
+  balance.available = Math.max(0, balance.available + delta);
+  balance.total = Math.max(0, balance.total + delta);
+  simulatedBalances.set(key, balance);
 }
