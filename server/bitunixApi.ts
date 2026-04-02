@@ -243,7 +243,7 @@ export async function getBitunixKlines(
       low: parseFloat(k.low || "0"),
       close: parseFloat(k.close || "0"),
       volume: parseFloat(k.quoteVol || k.baseVol || "0"),
-    })).sort((a, b) => a.time - b.time);
+    })).sort((a: { time: number }, b: { time: number }) => a.time - b.time)
 
     return {
       success: true,

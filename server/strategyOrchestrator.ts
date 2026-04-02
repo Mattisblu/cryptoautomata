@@ -1,6 +1,7 @@
 import type { 
   TradingAlgorithm, 
   Exchange, 
+  Market,
   ExecutionMode, 
   OptimizationMode, 
   OptimizationSuggestion, 
@@ -8,6 +9,8 @@ import type {
   RunningStrategy,
   RiskManagement,
   Position,
+  Order,
+  ApiCredentials,
   VolatilityGuardConfig,
   AssetGuardRule 
 } from "@shared/schema";
@@ -1337,7 +1340,7 @@ class StrategyOrchestrator {
       if (decision.action === "buy" || decision.action === "sell") {
         // getMarkets now returns MarketsResult with data source embedded
         const marketsResult = await exchangeService.getMarkets(exchange);
-        const market = marketsResult.markets.find(m => m.symbol === symbol);
+        const market = marketsResult.markets.find((m: Market) => m.symbol === symbol);
         const marketMaxLeverage = market?.maxLeverage || exchangeInfo.maxLeverage;
         
         const effectiveLeverage = Math.min(
@@ -1349,13 +1352,20 @@ class StrategyOrchestrator {
         const positionSize = Math.min(riskManagement.maxPositionSize, 1000);
         const quantity = positionSize / ticker.lastPrice;
 
-        const order = await exchangeService.placeOrder(exchange, credentials, {
-          symbol,
-          type: decision.rule?.priceType || "market",
-          side: decision.action as "buy" | "sell",
-          quantity,
-          price: ticker.lastPrice,
-        });
+        const order = await exchangeService.placeOrder(
+          exchange,
+          credentials.apiKey,
+          credentials.secretKey,
+          false,
+          credentials,
+          {
+            symbol,
+            type: (decision.rule?.priceType as "market" | "limit") || "market",
+            side: decision.action as "buy" | "sell",
+            quantity,
+            price: ticker.lastPrice,
+          }
+        );
 
         await storage.addOrder(exchange, order);
 

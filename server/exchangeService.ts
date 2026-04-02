@@ -2,10 +2,10 @@ import type { Exchange, Market, Ticker, Kline, Position, Order, ApiCredentials }
 import { randomUUID } from "crypto";
 import { getCoinstoreContracts, getCoinstoreTicker, getCoinstoreKlines, validateCoinstoreCredentials } from "./coinstoreApi";
 import { getBydfiMarkets, getBydfiTicker, getBydfiKlines, validateBydfiCredentials } from "./bydfiApi";
-import { 
-  getBitunixMarkets, 
-  getBitunixTicker, 
-  getBitunixKlines, 
+import {
+  getBitunixMarkets,
+  getBitunixTicker,
+  getBitunixKlines,
   validateBitunixCredentials,
   placeBitunixOrder,
   setBitunixLeverage,
@@ -195,54 +195,53 @@ async function waitForRateLimit(exchange: Exchange): Promise<void> {
     console.log(`[${exchange.toUpperCase()}] Rate limit backoff: waiting ${waitTime}ms`);
     await new Promise(resolve => setTimeout(resolve, waitTime));
   }
-  
+
   // Get or create limiter for this exchange
   let limiter = exchangeRateLimits.get(exchange);
   if (!limiter) {
     limiter = { lastRequest: 0, requestQueue: Promise.resolve() };
     exchangeRateLimits.set(exchange, limiter);
   }
-  
+
   // Chain this request onto the queue - this ensures serialization
   // Each caller waits for previous requests to complete before proceeding
   const previousQueue = limiter.requestQueue;
-  
+
   // Create a new promise that this caller will resolve when done with the delay
   let resolveCurrentRequest: () => void;
   limiter.requestQueue = new Promise<void>((resolve) => {
     resolveCurrentRequest = resolve;
-  });
-  
+});
+
   // Wait for previous requests to complete
   await previousQueue;
-  
+
   // Calculate delay needed from last request
   const timeSinceLastRequest = Date.now() - limiter.lastRequest;
   if (timeSinceLastRequest < MIN_REQUEST_DELAY_MS) {
     const delay = MIN_REQUEST_DELAY_MS - timeSinceLastRequest;
     await new Promise(resolve => setTimeout(resolve, delay));
-  }
-  
+
   limiter.lastRequest = Date.now();
-  
+
   // Signal that this request's delay is complete, allowing next request to proceed
   resolveCurrentRequest!();
-}
+}}
 
 function handleRateLimitError(exchange: Exchange, errorMsg: string): void {
   // Detect rate limit errors from common patterns
-  const isRateLimit = 
+  const isRateLimit =
     errorMsg.toLowerCase().includes("rate limit") ||
     errorMsg.toLowerCase().includes("too many") ||
     errorMsg.includes("429") ||
     errorMsg.includes("HTTP_429");
-  
+
   if (isRateLimit) {
     const current = rateLimitBackoff.get(exchange);
     const newDelay = current ? Math.min(current.delay * 2, MAX_BACKOFF_MS) : INITIAL_BACKOFF_MS;
-    rateLimitBackoff.set(exchange, { 
-      until: Date.now() + newDelay, 
-      delay: newDelay 
+    rateLimitBackoff.set(exchange, {
+      until: Date.now() + newDelay,
+      delay: newDelay
     });
     console.warn(`[${exchange.toUpperCase()}] Rate limit detected, backing off for ${newDelay}ms`);
   }
@@ -300,23 +299,22 @@ export interface RealOrderResult {
   exchangeOrderId?: string;
 }
 
-interface ExchangeService {
+export interface ExchangeService {
   validateCredentials(credentials: ApiCredentials): Promise<boolean>;
   getMarkets(exchange: Exchange): Promise<MarketsResult>;
   getTicker(exchange: Exchange, symbol: string): Promise<TickerResult>;
   getKlines(exchange: Exchange, symbol: string, timeframe: string, limit?: number): Promise<KlinesResult>;
   getPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]>;
   getOrders(exchange: Exchange, credentials: ApiCredentials): Promise<Order[]>;
-  placeOrder(exchange: Exchange, credentials: ApiCredentials, order: Partial<Order>): Promise<Order>;
+  placeOrder(exchange: Exchange, apiKey: string, secretKey: string, saveCredentials: boolean, credentials: ApiCredentials, order: Partial<Order>): Promise<Order>;
   placeRealOrder(exchange: Exchange, credentials: ApiCredentials, params: RealOrderParams): Promise<RealOrderResult>;
   cancelOrder(exchange: Exchange, credentials: ApiCredentials, orderId: string): Promise<boolean>;
   closePosition(exchange: Exchange, credentials: ApiCredentials, positionId: string): Promise<boolean>;
   closeRealPosition(exchange: Exchange, credentials: ApiCredentials, position: Position): Promise<boolean>;
   closeAllPositions(exchange: Exchange, credentials: ApiCredentials): Promise<boolean>;
   fetchRealPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]>;
-  getExchangeInfo(exchange: Exchange): typeof EXCHANGE_CONFIG[Exchange];
+  getExchangeInfo(exchange: Exchange): any;
 }
-
 // Base prices for fallback simulation
 const BASE_PRICES: Record<string, number> = {
   BTCUSDT: 95000,
@@ -340,18 +338,18 @@ function getCurrentPrice(exchange: Exchange, symbol: string): number {
   const cached = priceCache.get(cacheKey);
   const config = EXCHANGE_CONFIG[exchange];
   const basePrice = BASE_PRICES[symbol] || 100;
-  
+
   if (cached && Date.now() - cached.lastUpdate < 1000) {
     return cached.price;
   }
-  
+
   const lastPrice = cached?.price || basePrice;
   const volatility = config.priceVolatility;
   const change = (Math.random() - 0.5) * 2 * volatility;
   const newPrice = lastPrice * (1 + change);
-  
+
   const clampedPrice = Math.max(basePrice * 0.8, Math.min(basePrice * 1.2, newPrice));
-  
+
   priceCache.set(cacheKey, { price: clampedPrice, lastUpdate: Date.now() });
   return clampedPrice;
 }
@@ -361,7 +359,7 @@ function generateSimulatedTicker(exchange: Exchange, symbol: string): Ticker {
   const currentPrice = getCurrentPrice(exchange, symbol);
   const basePrice = BASE_PRICES[symbol] || 100;
   const change = (currentPrice - basePrice) / basePrice;
-  
+
   const volumeMultipliers: Record<Exchange, number> = {
     coinstore: 1.0,
     bydfi: 1.5,
@@ -369,7 +367,7 @@ function generateSimulatedTicker(exchange: Exchange, symbol: string): Ticker {
     toobit: 1.3,
   };
   const volumeMultiplier = volumeMultipliers[exchange];
-  
+
   return {
     symbol,
     lastPrice: currentPrice,
@@ -388,29 +386,29 @@ function generateSimulatedKlines(exchange: Exchange, symbol: string, timeframe: 
   const config = EXCHANGE_CONFIG[exchange];
   const timeframeMs = getTimeframeMs(timeframe);
   const now = Date.now();
-  
+
   let price = (BASE_PRICES[symbol] || 100) * (0.95 + Math.random() * 0.1);
 
   for (let i = limit; i > 0; i--) {
     const volatility = config.priceVolatility + Math.random() * 0.005;
     const trend = Math.random() - 0.48;
-    
+
     const open = price;
     const changePercent = volatility * trend;
     const close = open * (1 + changePercent);
     const high = Math.max(open, close) * (1 + Math.random() * volatility);
     const low = Math.min(open, close) * (1 - Math.random() * volatility);
-    
+
     const market = FALLBACK_MARKETS[exchange]?.find(m => m.symbol === symbol);
     const precision = market?.pricePrecision || 4;
-    
+
     const volumeMultipliers: Record<Exchange, number> = {
       coinstore: 1.0,
       bydfi: 1.5,
       bitunix: 1.2,
       toobit: 1.3,
     };
-    
+
     klines.push({
       time: now - (i * timeframeMs),
       open: parseFloat(open.toFixed(precision)),
@@ -453,17 +451,17 @@ export const exchangeService: ExchangeService = {
     if (!credentials.apiKey || !credentials.secretKey) {
       return false;
     }
-    
+
     // For development/testing with test keys, always accept
     if (credentials.apiKey.startsWith("test")) {
       await new Promise(resolve => setTimeout(resolve, 300));
       return true;
     }
-    
+
     if (credentials.apiKey.startsWith("invalid")) {
       return false;
     }
-    
+
     // Try real API validation if credentials look real
     if (USE_LIVE_API && credentials.apiKey.length > 10) {
       try {
@@ -480,22 +478,21 @@ export const exchangeService: ExchangeService = {
         console.warn(`Live credential validation failed for ${credentials.exchange}, accepting for paper trading`);
       }
     }
-    
+
     // Accept credentials for paper trading mode
     return true;
   },
-
   async getMarkets(exchange: Exchange): Promise<MarketsResult> {
     // Check cache first
     const cached = marketsCache.get(exchange);
     if (cached && Date.now() - cached.timestamp < MARKETS_CACHE_TTL) {
       return { markets: cached.markets, dataSource: "live" };
     }
-    
+
     if (USE_LIVE_API) {
       try {
         let liveMarkets: Market[] = [];
-        
+
         if (exchange === "coinstore") {
           liveMarkets = await getCoinstoreContracts();
         } else if (exchange === "bydfi") {
@@ -505,7 +502,7 @@ export const exchangeService: ExchangeService = {
         } else if (exchange === "toobit") {
           liveMarkets = await getToobitMarkets();
         }
-        
+
         if (liveMarkets.length > 0) {
           console.log(`[${exchange.toUpperCase()}] Fetched ${liveMarkets.length} markets from live API`);
           marketsCache.set(exchange, { markets: liveMarkets, timestamp: Date.now() });
@@ -516,7 +513,7 @@ export const exchangeService: ExchangeService = {
         console.warn(`[${exchange.toUpperCase()}] Live markets API failed, using fallback:`, error);
       }
     }
-    
+
     // Fallback to static markets
     lastDataSource = "simulated";
     return { markets: FALLBACK_MARKETS[exchange] || [], dataSource: "simulated" };
@@ -524,22 +521,22 @@ export const exchangeService: ExchangeService = {
 
   async getTicker(exchange: Exchange, symbol: string): Promise<TickerResult> {
     const tickerCacheKey = `${exchange}:${symbol}`;
-    
+
     // Check ticker result cache first - prevents duplicate API calls within TTL
     const cachedResult = tickerResultCache.get(tickerCacheKey);
     if (cachedResult && Date.now() - cachedResult.timestamp < TICKER_CACHE_TTL) {
       return cachedResult.result;
     }
-    
+
     let dataError: string | undefined;
-    
+
     if (USE_LIVE_API) {
       try {
         // Wait for rate limit before making request
         await waitForRateLimit(exchange);
-        
+
         let result: { success: boolean; data: any; error?: string; errorCode?: string } | null = null;
-        
+
         if (exchange === "coinstore") {
           result = await getCoinstoreTicker(symbol);
         } else if (exchange === "bydfi") {
@@ -549,14 +546,14 @@ export const exchangeService: ExchangeService = {
         } else if (exchange === "toobit") {
           result = await getToobitTicker(symbol);
         }
-        
+
         if (result?.success && result.data && result.data.lastPrice > 0) {
           priceCache.set(tickerCacheKey, { price: result.data.lastPrice, lastUpdate: Date.now() });
           lastDataSource = "live";
           lastDataError = undefined;
           clearRateLimitBackoff(exchange);
           console.log(`[${exchange.toUpperCase()}] Live ticker for ${symbol}: $${result.data.lastPrice.toFixed(2)}`);
-          
+
           const tickerResult: TickerResult = { ticker: result.data, dataSource: "live" };
           tickerResultCache.set(tickerCacheKey, { result: tickerResult, timestamp: Date.now() });
           return tickerResult;
@@ -574,7 +571,7 @@ export const exchangeService: ExchangeService = {
         handleRateLimitError(exchange, errorMsg);
       }
     }
-    
+
     // Fallback to simulated ticker
     lastDataSource = "simulated";
     const ticker = generateSimulatedTicker(exchange, symbol);
@@ -585,22 +582,22 @@ export const exchangeService: ExchangeService = {
 
   async getKlines(exchange: Exchange, symbol: string, timeframe: string, limit: number = 100): Promise<KlinesResult> {
     const klinesCacheKey = `${exchange}:${symbol}:${timeframe}:${limit}`;
-    
+
     // Check klines result cache first - prevents duplicate API calls within TTL
     const cachedResult = klinesResultCache.get(klinesCacheKey);
     if (cachedResult && Date.now() - cachedResult.timestamp < KLINES_CACHE_TTL) {
       return cachedResult.result;
     }
-    
+
     let dataError: string | undefined;
-    
+
     if (USE_LIVE_API) {
       try {
         // Wait for rate limit before making request
         await waitForRateLimit(exchange);
-        
+
         let result: { success: boolean; data: any; error?: string; errorCode?: string } | null = null;
-        
+
         if (exchange === "coinstore") {
           result = await getCoinstoreKlines(symbol, timeframe, limit);
         } else if (exchange === "bydfi") {
@@ -610,13 +607,13 @@ export const exchangeService: ExchangeService = {
         } else if (exchange === "toobit") {
           result = await getToobitKlines(symbol, timeframe, limit);
         }
-        
+
         if (result?.success && result.data && result.data.length > 0) {
           lastDataSource = "live";
           lastDataError = undefined;
           clearRateLimitBackoff(exchange);
           console.log(`[${exchange.toUpperCase()}] Live klines for ${symbol}: ${result.data.length} candles`);
-          
+
           const klinesResult: KlinesResult = { klines: result.data, dataSource: "live" };
           klinesResultCache.set(klinesCacheKey, { result: klinesResult, timestamp: Date.now() });
           return klinesResult;
@@ -634,14 +631,14 @@ export const exchangeService: ExchangeService = {
         handleRateLimitError(exchange, errorMsg);
       }
     }
-    
+
     // Fallback to simulated klines
     lastDataSource = "simulated";
     const klines = generateSimulatedKlines(exchange, symbol, timeframe, limit);
     const fallbackResult: KlinesResult = { klines, dataSource: "simulated", dataError };
     klinesResultCache.set(klinesCacheKey, { result: fallbackResult, timestamp: Date.now() });
     return fallbackResult;
-  },
+},
 
   async getPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]> {
     // Positions are managed locally for paper trading
@@ -655,20 +652,26 @@ export const exchangeService: ExchangeService = {
     return simulatedOrders.get(key) || [];
   },
 
-  async placeOrder(exchange: Exchange, credentials: ApiCredentials, orderParams: Partial<Order>): Promise<Order> {
+  async placeOrder(
+    exchange: Exchange,
+    apiKey: string,
+    secretKey: string,
+    saveCredentials: boolean,
+    credentials: ApiCredentials,
+    orderParams: Partial<Order>
+  ): Promise<Order> {
     await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 100));
-    
     const config = EXCHANGE_CONFIG[exchange];
     const symbol = orderParams.symbol || "BTCUSDT";
     const currentPrice = getCurrentPrice(exchange, symbol);
-    
+
     const order: Order = {
       id: randomUUID(),
       symbol,
       type: orderParams.type || "market",
       side: orderParams.side || "buy",
-      price: orderParams.type === "limit" 
-        ? (orderParams.price || currentPrice) 
+      price: orderParams.type === "limit"
+        ? (orderParams.price || currentPrice)
         : currentPrice,
       quantity: orderParams.quantity || config.minOrderSize[symbol] || 0.001,
       filledQuantity: orderParams.type === "market" ? (orderParams.quantity || 0.001) : 0,
@@ -684,13 +687,13 @@ export const exchangeService: ExchangeService = {
     if (order.status === "filled") {
       const positions = simulatedPositions.get(key) || [];
       const existingPosition = positions.find(p => p.symbol === symbol);
-      
+
       if (existingPosition) {
         if ((existingPosition.side === "long" && order.side === "buy") ||
-            (existingPosition.side === "short" && order.side === "sell")) {
+          (existingPosition.side === "short" && order.side === "sell")) {
           const totalQuantity = existingPosition.quantity + order.quantity;
-          const avgPrice = (existingPosition.entryPrice * existingPosition.quantity + 
-                          order.price * order.quantity) / totalQuantity;
+          const avgPrice = (existingPosition.entryPrice * existingPosition.quantity +
+            order.price * order.quantity) / totalQuantity;
           existingPosition.quantity = totalQuantity;
           existingPosition.entryPrice = avgPrice;
         } else {
@@ -713,14 +716,14 @@ export const exchangeService: ExchangeService = {
           marginType: "isolated",
           unrealizedPnl: 0,
           unrealizedPnlPercent: 0,
-          liquidationPrice: order.side === "buy" 
-            ? order.price * (1 - 1/leverage * 0.9)
-            : order.price * (1 + 1/leverage * 0.9),
+          liquidationPrice: order.side === "buy"
+            ? order.price * (1 - 1 / leverage * 0.9)
+            : order.price * (1 + 1 / leverage * 0.9),
           timestamp: Date.now(),
         };
         positions.push(position);
       }
-      
+
       simulatedPositions.set(key, positions);
     }
 
@@ -729,29 +732,29 @@ export const exchangeService: ExchangeService = {
 
   async cancelOrder(exchange: Exchange, credentials: ApiCredentials, orderId: string): Promise<boolean> {
     await new Promise(resolve => setTimeout(resolve, 80));
-    
+
     const key = getStorageKey(exchange, credentials.apiKey);
     const orders = simulatedOrders.get(key) || [];
     const order = orders.find(o => o.id === orderId);
-    
+
     if (order && order.status === "pending") {
       order.status = "cancelled";
       return true;
     }
-    
+
     return false;
   },
 
   async closePosition(exchange: Exchange, credentials: ApiCredentials, positionId: string): Promise<boolean> {
     await new Promise(resolve => setTimeout(resolve, 150));
-    
+
     const key = getStorageKey(exchange, credentials.apiKey);
     const positions = simulatedPositions.get(key) || [];
     const idx = positions.findIndex(p => p.id === positionId);
-    
+
     if (idx >= 0) {
       const position = positions[idx];
-      
+
       const closingOrder: Order = {
         id: randomUUID(),
         symbol: position.symbol,
@@ -763,39 +766,39 @@ export const exchangeService: ExchangeService = {
         status: "filled",
         timestamp: Date.now(),
       };
-      
+
       const orders = simulatedOrders.get(key) || [];
       orders.push(closingOrder);
       simulatedOrders.set(key, orders);
-      
+
       positions.splice(idx, 1);
       simulatedPositions.set(key, positions);
-      
+
       return true;
     }
-    
+
     return false;
   },
 
   async closeAllPositions(exchange: Exchange, credentials: ApiCredentials): Promise<boolean> {
     await new Promise(resolve => setTimeout(resolve, 300));
-    
+
     const key = getStorageKey(exchange, credentials.apiKey);
     const positions = simulatedPositions.get(key) || [];
-    
+
     for (const position of positions) {
       await this.closePosition(exchange, credentials, position.id);
     }
-    
+
     return true;
   },
 
   // ============ REAL TRADING METHODS ============
-  
+
   // Place a real order on the exchange
   async placeRealOrder(exchange: Exchange, credentials: ApiCredentials, params: RealOrderParams): Promise<RealOrderResult> {
     console.log(`[REAL TRADING] Placing order on ${exchange}: ${params.side} ${params.quantity} ${params.symbol}`);
-    
+
     if (exchange === "bitunix") {
       try {
         // First, set leverage if specified
@@ -869,9 +872,9 @@ export const exchangeService: ExchangeService = {
             marginType: "isolated",
             unrealizedPnl: 0,
             unrealizedPnlPercent: 0,
-            liquidationPrice: params.side === "buy" 
-              ? fillPrice * (1 - 1/leverage * 0.9)
-              : fillPrice * (1 + 1/leverage * 0.9),
+            liquidationPrice: params.side === "buy"
+              ? fillPrice * (1 - 1 / leverage * 0.9)
+              : fillPrice * (1 + 1 / leverage * 0.9),
             timestamp: Date.now(),
           };
         }
@@ -902,18 +905,18 @@ export const exchangeService: ExchangeService = {
   // Close a real position on the exchange
   async closeRealPosition(exchange: Exchange, credentials: ApiCredentials, position: Position): Promise<boolean> {
     console.log(`[REAL TRADING] Closing position on ${exchange}: ${position.symbol} ${position.side}`);
-    
+
     if (exchange === "bitunix") {
       try {
         // First try to fetch real positions to get the positionId
         const positionsResult = await getBitunixPositions(credentials);
-        
+
         if (positionsResult.success && positionsResult.data) {
           // Find matching position
           const realPosition = positionsResult.data.find(
             (p: BitunixPosition) => p.symbol === position.symbol
           );
-          
+
           if (realPosition) {
             const result = await closeBitunixPosition(
               credentials,
@@ -922,7 +925,7 @@ export const exchangeService: ExchangeService = {
               realPosition.side,
               realPosition.qty
             );
-            
+
             if (result.success) {
               console.log(`[REAL TRADING] Position closed successfully`);
               return true;
@@ -932,7 +935,7 @@ export const exchangeService: ExchangeService = {
             }
           }
         }
-        
+
         // If we can't find real position, try placing opposite order
         const closeSide = position.side === "long" ? "SELL" : "BUY";
         const result = await placeBitunixOrder(credentials, {
@@ -943,12 +946,12 @@ export const exchangeService: ExchangeService = {
           tradeSide: "CLOSE",
           reduceOnly: true,
         });
-        
+
         if (result.success) {
           console.log(`[REAL TRADING] Position closed with reduce-only order`);
           return true;
         }
-        
+
         console.error(`[REAL TRADING] Failed to close position: ${result.error}`);
         return false;
       } catch (error) {
@@ -957,23 +960,23 @@ export const exchangeService: ExchangeService = {
         return false;
       }
     }
-    
+
     return false;
   },
 
   // Fetch real positions from the exchange
   async fetchRealPositions(exchange: Exchange, credentials: ApiCredentials): Promise<Position[]> {
     console.log(`[REAL TRADING] Fetching positions from ${exchange}`);
-    
+
     if (exchange === "bitunix") {
       try {
         const result = await getBitunixPositions(credentials);
-        
+
         if (!result.success || !result.data) {
           console.error(`[REAL TRADING] Failed to fetch positions: ${result.error}`);
           return [];
         }
-        
+
         const positions: Position[] = result.data.map((p: BitunixPosition) => ({
           id: p.positionId,
           symbol: p.symbol,
@@ -988,17 +991,17 @@ export const exchangeService: ExchangeService = {
           liquidationPrice: parseFloat(p.liquidationPrice),
           timestamp: Date.now(),
         }));
-        
+
         // Calculate unrealized PnL percent
         for (const pos of positions) {
           if (pos.entryPrice > 0) {
-            const priceDiff = pos.side === "long" 
-              ? pos.markPrice - pos.entryPrice 
+            const priceDiff = pos.side === "long"
+              ? pos.markPrice - pos.entryPrice
               : pos.entryPrice - pos.markPrice;
             pos.unrealizedPnlPercent = (priceDiff / pos.entryPrice) * 100 * pos.leverage;
           }
         }
-        
+
         console.log(`[REAL TRADING] Fetched ${positions.length} positions`);
         return positions;
       } catch (error) {
@@ -1007,10 +1010,10 @@ export const exchangeService: ExchangeService = {
         return [];
       }
     }
-    
+
     return [];
   },
-  
+
   getExchangeInfo(exchange: Exchange) {
     return EXCHANGE_CONFIG[exchange];
   },
@@ -1042,8 +1045,8 @@ export function createTickerStream(
     try {
       // getTicker now returns TickerResult with data source embedded
       const result = await exchangeService.getTicker(exchange, symbol);
-      callback({ 
-        ticker: result.ticker, 
+      callback({
+        ticker: result.ticker,
         dataSource: result.dataSource,
         ...(result.dataError ? { dataError: result.dataError } : {})
       });
@@ -1072,8 +1075,8 @@ export function createKlinesStream(
   const fetchKlines = async () => {
     try {
       const result = await exchangeService.getKlines(exchange, symbol, timeframe, 100);
-      callback({ 
-        klines: result.klines, 
+      callback({
+        klines: result.klines,
         dataSource: result.dataSource,
         ...(result.dataError ? { dataError: result.dataError } : {})
       });
@@ -1094,11 +1097,11 @@ export function createKlinesStream(
 export function updatePositionPrices(exchange: Exchange, credentials: ApiCredentials): void {
   const key = getStorageKey(exchange, credentials.apiKey);
   const positions = simulatedPositions.get(key) || [];
-  
+
   for (const position of positions) {
     const currentPrice = getCurrentPrice(exchange, position.symbol);
     position.markPrice = currentPrice;
-    
+
     if (position.side === "long") {
       position.unrealizedPnl = (currentPrice - position.entryPrice) * position.quantity * position.leverage;
       position.unrealizedPnlPercent = ((currentPrice - position.entryPrice) / position.entryPrice) * 100 * position.leverage;
@@ -1107,7 +1110,7 @@ export function updatePositionPrices(exchange: Exchange, credentials: ApiCredent
       position.unrealizedPnlPercent = ((position.entryPrice - currentPrice) / position.entryPrice) * 100 * position.leverage;
     }
   }
-  
+
   simulatedPositions.set(key, positions);
 }
 
@@ -1132,7 +1135,7 @@ export async function getAvailableBalance(
   executionMode: "paper" | "real" = "paper"
 ): Promise<BalanceResult> {
   const key = getStorageKey(exchange, credentials.apiKey);
-  
+
   // Paper trading - return simulated balance
   if (executionMode === "paper") {
     let balance = simulatedBalances.get(key);
@@ -1140,7 +1143,7 @@ export async function getAvailableBalance(
       balance = { available: 1000, total: 1000 }; // Default $1000 paper balance
       simulatedBalances.set(key, balance);
     }
-    
+
     // Calculate used margin from open positions
     const positions = simulatedPositions.get(key) || [];
     let usedMargin = 0;
@@ -1151,7 +1154,7 @@ export async function getAvailableBalance(
       usedMargin += notionalValue / (pos.leverage || 1);
       unrealizedPnl += pos.unrealizedPnl || 0;
     }
-    
+
     return {
       available: Math.max(0, balance.total - usedMargin + unrealizedPnl),
       frozen: usedMargin,
@@ -1161,7 +1164,7 @@ export async function getAvailableBalance(
       dataSource: "simulated",
     };
   }
-  
+
   // Real trading - fetch from exchange
   if (exchange === "bitunix" && USE_LIVE_API) {
     const result = await getBitunixBalance(credentials);
@@ -1188,7 +1191,7 @@ export async function getAvailableBalance(
       };
     }
   }
-  
+
   // Other exchanges - return simulated for now
   return {
     available: 1000,

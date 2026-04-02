@@ -1390,7 +1390,8 @@ class TradingBot {
         // Calculate position size based on risk management
         // Get market-specific max leverage - getMarkets now returns MarketsResult
         const marketsResult = await exchangeService.getMarkets(exchange);
-        const market = marketsResult.markets.find(m => m.symbol === symbol);
+        // ...existing code...
+        const market = marketsResult.markets.find((m: import("@shared/schema").Market) => m.symbol === symbol);
         const marketMaxLeverage = market?.maxLeverage || exchangeInfo.maxLeverage;
         
         // Use the minimum of algorithm, exchange-wide, and market-specific leverage limits
@@ -1435,13 +1436,20 @@ class TradingBot {
           console.log(`[REAL TRADING] Order executed: ${realOrderId}`);
         } else {
           // PAPER TRADING: Simulated order
-          order = await exchangeService.placeOrder(exchange, credentials, {
-            symbol,
-            type: decision.rule?.priceType || "market",
-            side: decision.action as "buy" | "sell",
-            quantity,
-            price: ticker.lastPrice,
-          });
+          order = await exchangeService.placeOrder(
+            exchange,
+            'test',
+            'test',
+            false,
+            credentials,
+            {
+              symbol,
+              type: decision.rule?.priceType || "market",
+              side: decision.action as "buy" | "sell",
+              quantity,
+              price: ticker.lastPrice,
+            }
+          );
         }
 
         await storage.addOrder(exchange, order);

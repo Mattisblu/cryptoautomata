@@ -4,10 +4,11 @@ import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "crypto";
 import { storage } from "./storage";
 import { exchangeService, createTickerStream, createKlinesStream } from "./exchangeService";
-import { analyzeAndRespond } from "./openai";
+import { analyzeAndRespond, ollamaHealth } from "./openai";
 import { tradingBot } from "./tradingBot";
 import { strategyOrchestrator } from "./strategyOrchestrator";
 import { notificationService } from "./notificationService";
+import { managerAgent } from "./agents/managerAgent";
 import { getCoinstoreBalance } from "./coinstoreApi";
 import { getBydfiBalance } from "./bydfiApi";
 import { getBitunixBalance } from "./bitunixApi";
@@ -64,8 +65,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               data.symbol,
               (streamData) => {
                 if (ws.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({ 
-                    type: "ticker", 
+                  ws.send(JSON.stringify({
+                    type: "ticker",
                     data: streamData.ticker,
                     dataSource: streamData.dataSource,
                     ...(streamData.dataError ? { dataError: streamData.dataError } : {})
@@ -340,7 +341,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ success: false, error: "Not authenticated" });
       }
 
-      const order = await exchangeService.placeOrder(exchange, credentials, orderInput);
+      const order = await exchangeService.placeOrder(
+        exchange,
+        credentials.apiKey,
+        credentials.secretKey,
+        false,
+        credentials,
+        orderInput
+      );
+
       await storage.addOrder(exchange, order);
 
       // Broadcast order update
@@ -359,41 +368,219 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/chat", async (req, res) => {
     try {
-      const { content, context } = req.body;
+      const { content, context, attachmentText } = req.body;
 
       if (!content) {
         return res.status(400).json({ success: false, error: "Message content required" });
       }
 
-      // Save user message
+      // Save user message (include any pasted/attached text as placeholder)
       await storage.addChatMessage({
         role: "user",
         content,
+        attachmentText: attachmentText || undefined,
       });
 
-      // Get AI response
-      const response = await analyzeAndRespond(content, context || {});
+      // Merge attachment text into context so LLM can use it
+      const mergedContext = {
+        ...(context || {}),
+        attachmentText: attachmentText || undefined,
+      };
 
-      // Save assistant message
+      // Get AI response
+      const response = await analyzeAndRespond(content, mergedContext);
+
+      // Save assistant message (mirror attachmentText for traceability)
       const assistantMessage = await storage.addChatMessage({
         role: "assistant",
         content: response.message,
         algorithmJson: response.algorithm,
+        attachmentText: attachmentText || undefined,
       });
 
       // If algorithm was generated, save it
+      let updatedProposalsCount = 0;
       if (response.algorithm) {
         await storage.saveAlgorithm(response.algorithm);
+        // Also attach parsed algorithm to any matching pending proposals (by objective/content)
+        try {
+          const proposals = await storage.getProposals();
+          const matches = proposals.filter((p: any) => p.status === 'pending' && p.request?.objective === content);
+          for (const p of matches) {
+            await storage.updateProposal(p.id, { algorithm: response.algorithm, message: 'analysis complete' });
+            updatedProposalsCount++;
+            try { broadcast('proposal', { type: 'proposal.updated', proposal: await storage.getProposal(p.id) }); } catch (e) { /* ignore */ }
+          }
+        } catch (err) {
+          console.warn('Failed to attach algorithm to matching proposals:', err);
+        }
       }
 
       res.json({
         success: true,
         message: response.message,
         algorithm: response.algorithm,
+        updatedProposals: updatedProposalsCount,
       });
     } catch (error) {
       console.error("Chat error:", error);
       res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // LLM health check (Ollama)
+  app.get("/api/llm/health", async (_req, res) => {
+    try {
+      const healthy = await ollamaHealth();
+      res.json({ success: true, healthy });
+    } catch (error) {
+      res.status(500).json({ success: false, healthy: false, error: (error as Error).message });
+    }
+  });
+
+  // ============ AGENT WORKFLOW ROUTES ============
+
+  // Submit a trade request to the agent workflow (Manager -> Market -> Risk -> Execution)
+  app.post("/api/agent/trade", async (req, res) => {
+    try {
+      const { symbol, exchange, side, quantity, price, leverage, userId, objective, autoApprove, timeframe, tradingMode } = req.body;
+
+      if (!symbol || !exchange || !side || !quantity || !userId) {
+        return res.status(400).json({ success: false, error: "Missing required trade fields" });
+      }
+
+      const tradeRequest = {
+        symbol,
+        exchange,
+        side,
+        quantity: Number(quantity),
+        price: price ? Number(price) : undefined,
+        leverage: leverage ? Number(leverage) : undefined,
+        userId,
+        executionMode: req.body.executionMode || 'paper',
+        objective: objective || undefined,
+        autoApprove: !!autoApprove,
+        timeframe: timeframe || undefined,
+        tradingMode: tradingMode || undefined,
+      };
+
+      // If user provided an objective and asked for a manual approval flow, persist a proposal and
+      // return immediately (202). For `agent` trading mode we DO NOT create the initial proposal
+      // here because the orchestrator may invoke the `ai` tool which will create a proposal.
+      if (tradeRequest.objective && !tradeRequest.autoApprove) {
+        if (tradeRequest.tradingMode === 'agent') {
+          // Fire-and-forget background processing via managerAgent/orchestrator which may call
+          // the `ai` tool and create proposals itself. Return 202 to the client indicating work started.
+          (async () => {
+            try {
+              await managerAgent.handleUserTradeRequest(tradeRequest as any, (m) => {
+                try { broadcast('agent', m); } catch (e) { /* ignore */ }
+              });
+              // Orchestrator/tool will persist proposals and broadcast them when ready.
+            } catch (err) {
+              try { broadcast('proposal', { type: 'proposal.error', error: (err as Error).message || String(err) }); } catch (e) { /* ignore */ }
+            }
+          })();
+
+          return res.status(202).json({ success: true, message: 'Agent processing started' });
+        }
+
+        const proposal = await storage.createProposal({
+          userId: tradeRequest.userId,
+          request: tradeRequest,
+          algorithm: null,
+          message: 'pending analysis',
+          status: 'pending',
+        });
+
+        // Fire-and-forget background processing
+        (async () => {
+          try {
+            // Notify clients a proposal was created
+            try { broadcast('proposal', { type: 'proposal.created', proposal }); } catch (e) { /* ignore */ }
+
+            // Run the full manager/orchestrator flow which will call the LLM and generate an algorithm
+            await managerAgent.handleUserTradeRequest(tradeRequest as any, (m) => {
+              try { broadcast('agent', m); } catch (e) { /* ignore */ }
+            });
+
+            // Load any saved proposal (orchestrator may have persisted the algorithm)
+            const updated = await storage.getProposal(proposal.id);
+
+            // Update proposal to mark analysis complete (keep status as 'pending' until user approves)
+            await storage.updateProposal(proposal.id, {
+              algorithm: updated?.algorithm || null,
+              message: 'analysis complete',
+            });
+
+            const finalProposal = await storage.getProposal(proposal.id);
+            try { broadcast('proposal', { type: 'proposal.updated', proposal: finalProposal }); } catch (e) { /* ignore */ }
+          } catch (err) {
+            try { await storage.updateProposal(proposal.id, { message: `error: ${(err as Error).message || String(err)}` }); } catch (e) { /* ignore */ }
+            try { broadcast('proposal', { type: 'proposal.error', proposalId: proposal.id, error: (err as Error).message || String(err) }); } catch (e) { /* ignore */ }
+          }
+        })();
+
+        return res.status(202).json({ success: true, proposalId: proposal.id, message: 'Proposal pending analysis' });
+      }
+
+      // No async proposal flow requested — run synchronously and return final messages
+      const messages = await managerAgent.handleUserTradeRequest(tradeRequest as any, (m) => {
+        try { broadcast("agent", m); } catch (e) { /* ignore */ }
+      });
+
+      res.json(messages || []);
+    } catch (error) {
+      console.error("Agent trade error:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // List LLM proposals
+  app.get('/api/agent/proposals', async (req, res) => {
+    try {
+      const proposals = await storage.getProposals();
+      res.json({ success: true, proposals });
+    } catch (err) {
+      res.status(500).json({ success: false, error: (err as Error).message });
+    }
+  });
+
+  // Approve a proposal and execute
+  app.post('/api/agent/proposals/:id/approve', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const proposal = await storage.getProposal(id);
+      if (!proposal) return res.status(404).json({ success: false, error: 'Proposal not found' });
+
+      await storage.updateProposalStatus(id, 'approved');
+
+      // Build execution request from stored proposal
+      const execRequest = {
+        ...proposal.request,
+        algorithm: proposal.algorithm,
+        autoApprove: true,
+      };
+
+      const messages = await managerAgent.handleUserTradeRequest(execRequest as any, (m) => {
+        try { broadcast('agent', m); } catch (e) { /* ignore */ }
+      });
+
+      res.json({ success: true, messages });
+    } catch (err) {
+      res.status(500).json({ success: false, error: (err as Error).message });
+    }
+  });
+
+  app.post('/api/agent/proposals/:id/reject', async (req, res) => {
+    try {
+      const id = req.params.id;
+      const proposal = await storage.getProposal(id);
+      if (!proposal) return res.status(404).json({ success: false, error: 'Proposal not found' });
+      await storage.updateProposalStatus(id, 'rejected');
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 

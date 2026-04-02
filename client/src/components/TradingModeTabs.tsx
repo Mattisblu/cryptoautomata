@@ -18,10 +18,11 @@ const tradingModes: TradingModeConfig[] = [
     description: "Automated trading with AI-generated algorithms and scalping strategies",
   },
   {
-    value: "manual",
-    label: "Manual",
+    value: "agent",
+    label: "Agent",
     icon: Hand,
-    description: "Execute trades manually with full control",
+    description:
+      "Dynamic agent workflow: Manager, Market, Risk, Execution agents coordinate trades and risk management",
   },
 ];
 

@@ -1,0 +1,45 @@
+Deployment Checklist
+1. Environment Setup
+ Install Node.js (v18+ recommended)
+ Install PostgreSQL locally and create the required database
+ Install Ollama or qwen2.5:7b and expose API on localhost
+ Set up .env file with correct endpoints and keys:
+cd 
+2. Install Dependencies
+ Run npm install in both client/ and server/ directories
+3. Database Migration
+ Run Drizzle ORM migrations to set up tables (if needed)
+4. Start Services
+ Start backend server (Express.js)cd 
+ Start frontend client (React/Vite)
+ Start Ollama/qwen2.5:7b local model server
+5. Test Connections
+ Verify backend API endpoints (/api/agent/trade, /api/auth/connect, etc.)
+ Verify frontend loads and connects to backend
+ Verify AI/LLM requests route to local model
+ Verify database read/write operations
+6. Final Checks
+ Walk through UI (AgentTradingPanel, Dashboard, Settings)
+ Submit test trades and confirm agent workflow
+ Check notifications and analytics
+ Review logs for errors
+ # Start Ollama or qwen2.5:7b (adjust command as needed)
+# Start Ollama (recommended options to reduce memory pressure)
+# Example: run model with reduced context, GPU layer offload and short keep-alive
+# Replace `llama3` below with the model you have installed and that fits your GPU/host.
+# This example offloads 32 layers to GPU and sets keep-alive to 60s.
+Start-Process -NoNewWindow -FilePath "ollama" -ArgumentList "run llama3 --gpu 32 --num_ctx 2048 --keep-alive 60s --kv-cache q8_0"
+# or your qwen2.5:7b start command
+
+# Start PostgreSQL (if not running as a service)
+# Usually runs as a service, so skip if already running
+
+# Start backend server
+Push-Location "server"
+npm run dev
+Pop-Location
+
+# Start frontend client
+Push-Location "client"
+npm run dev
+Pop-Location

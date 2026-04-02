@@ -95,6 +95,19 @@ export interface IStorage {
   addChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   clearChatMessages(): Promise<void>;
 
+  // Agent Proposals (LLM-generated)
+  createProposal(proposal: {
+    userId: string;
+    request: any;
+    algorithm: any;
+    message?: string;
+    status?: 'pending' | 'approved' | 'rejected';
+  }): Promise<any>;
+  getProposals(): Promise<any[]>;
+  getProposal(id: string): Promise<any | null>;
+  updateProposalStatus(id: string, status: 'pending' | 'approved' | 'rejected'): Promise<any | null>;
+  updateProposal(id: string, updates: Partial<any>): Promise<any | null>;
+
   // Trade Cycle State
   getTradeCycleState(): Promise<TradeCycleState | null>;
   setTradeCycleState(state: TradeCycleState): Promise<void>;
@@ -198,6 +211,7 @@ export class MemStorage implements IStorage {
   // Stop orders are now in database (liveStopOrders table) - no longer using in-memory map
   // Note: algorithms are now stored in the database, not in-memory
   private chatMessages: ChatMessage[] = [];
+  private proposals: any[] = [];
   private tradeCycleState: TradeCycleState | null = null;
   private tradeLogs: TradeLogEntry[] = [];
   private riskParameters: RiskParameters | null = null;
@@ -545,6 +559,9 @@ export class MemStorage implements IStorage {
       rules: JSON.parse(alg.rules),
       riskManagement: JSON.parse(alg.riskManagement),
       createdAt: alg.createdAt.getTime(),
+      updatedAt: alg.updatedAt.getTime(),
+      status: "active",
+      source: 'algorithm',
     }));
   }
 
@@ -560,6 +577,9 @@ export class MemStorage implements IStorage {
       rules: JSON.parse(alg.rules),
       riskManagement: JSON.parse(alg.riskManagement),
       createdAt: alg.createdAt.getTime(),
+      updatedAt: alg.updatedAt ? alg.updatedAt.getTime() : alg.createdAt.getTime(),
+      status: (alg as any).status ? (alg as any).status as "active" | "paused" | "stopped" : "active",
+      source: 'algorithm',
     };
   }
 
@@ -612,6 +632,52 @@ export class MemStorage implements IStorage {
 
   async clearChatMessages(): Promise<void> {
     this.chatMessages = [];
+  }
+
+  // Agent Proposals
+  async createProposal(proposal: {
+    userId: string;
+    request: any;
+    algorithm: any;
+    message?: string;
+    status?: 'pending' | 'approved' | 'rejected';
+  }): Promise<any> {
+    const p = {
+      id: randomUUID(),
+      createdAt: Date.now(),
+      status: proposal.status || 'pending',
+      userId: proposal.userId,
+      request: proposal.request,
+      algorithm: proposal.algorithm,
+      source: 'proposal',
+      message: proposal.message || undefined,
+    };
+    this.proposals.push(p);
+    return p;
+  }
+
+  async getProposals(): Promise<any[]> {
+    return this.proposals.slice().reverse();
+  }
+
+  async getProposal(id: string): Promise<any | null> {
+    return this.proposals.find(p => p.id === id) || null;
+  }
+
+  async updateProposalStatus(id: string, status: 'pending' | 'approved' | 'rejected'): Promise<any | null> {
+    const p = this.proposals.find(x => x.id === id);
+    if (!p) return null;
+    p.status = status;
+    p.updatedAt = Date.now();
+    return p;
+  }
+
+  async updateProposal(id: string, updates: Partial<any>): Promise<any | null> {
+    const p = this.proposals.find(x => x.id === id);
+    if (!p) return null;
+    Object.assign(p, updates);
+    p.updatedAt = Date.now();
+    return p;
   }
 
   // Trade Cycle State

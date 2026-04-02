@@ -3,7 +3,7 @@ import { useTradingContext } from "@/lib/tradingContext";
 import { queryClient } from "@/lib/queryClient";
 import type { Ticker, Kline, TradeCycleState, Order, Position } from "@shared/schema";
 
-export function useWebSocket() {
+export function useWebSocket(onAgentMessage?: (msg: any) => void) {
   const {
     selectedExchange,
     selectedMarket,
@@ -53,6 +53,7 @@ export function useWebSocket() {
           status: "connected",
           exchange: selectedExchange || "coinstore",
           lastHeartbeat: Date.now(),
+          connected: true,
         });
 
         // Subscribe to market data if we have a selection
@@ -90,6 +91,7 @@ export function useWebSocket() {
                 status: "connected",
                 exchange: selectedExchange || "coinstore",
                 lastHeartbeat: Date.now(),
+                connected: true,
               });
               break;
             }
@@ -143,6 +145,19 @@ export function useWebSocket() {
             case "strategyUpdated":
               queryClient.invalidateQueries({ queryKey: ["/api/running-strategies"] });
               break;
+
+            case "agent": {
+              // Agent workflow messages from orchestrator (market, risk, execution, errors)
+              try {
+                const agentMsg = message.data;
+                if (onAgentMessage) {
+                  onAgentMessage(agentMsg);
+                }
+              } catch (e) {
+                console.error("Failed to handle agent message:", e);
+              }
+              break;
+            }
           }
         } catch (error) {
           console.error("WebSocket message parse error:", error);
@@ -155,6 +170,7 @@ export function useWebSocket() {
         setConnectionState({
           status: "disconnected",
           exchange: selectedExchange || "coinstore",
+          connected: false,
         });
 
         // Attempt reconnection after 3 seconds
@@ -169,6 +185,7 @@ export function useWebSocket() {
           status: "error",
           exchange: selectedExchange || "coinstore",
           error: "Connection error",
+          connected: false,
         });
       };
 

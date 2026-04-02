@@ -59,5 +59,19 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 (async () => {
+  // Check LLM availability (Ollama) before starting the app to provide early feedback
+  try {
+    // Import here to avoid startup order issues
+    const { ollamaHealth } = await import("./openai");
+    const healthy = await ollamaHealth();
+    if (!healthy) {
+      console.warn("Warning: Ollama LLM not available at", process.env.OLLAMA_URL || "http://localhost:11434", "- some AI features may fail");
+    } else {
+      console.log("Ollama LLM appears available");
+    }
+  } catch (e) {
+    console.warn("Warning: Failed to check Ollama health:", (e as Error).message || e);
+  }
+
   await runApp(setupVite);
 })();

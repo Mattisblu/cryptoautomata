@@ -334,6 +334,8 @@ export function AIChatbot() {
     liveMetrics,
   } = useTradingContext();
   const [input, setInput] = useState("");
+  const [attachmentText, setAttachmentText] = useState<string | null>(null);
+  const [attachmentName, setAttachmentName] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -341,6 +343,7 @@ export function AIChatbot() {
     mutationFn: async (content: string) => {
       const response = await apiRequest("POST", "/api/chat", {
         content,
+        attachmentText: attachmentText || undefined,
         context: {
           symbol: selectedMarket?.symbol,
           ticker,
@@ -362,7 +365,11 @@ export function AIChatbot() {
         role: "assistant",
         content,
         algorithmJson: data.algorithm,
+        attachmentText: attachmentText || undefined,
       });
+      // clear attached placeholder after successful send
+      setAttachmentText(null);
+      setAttachmentName(null);
     },
     onError: (error: Error) => {
       toast({
@@ -380,6 +387,7 @@ export function AIChatbot() {
     addChatMessage({
       role: "user",
       content: userMessage,
+      attachmentText: attachmentText || undefined,
     });
     setInput("");
     sendMessageMutation.mutate(userMessage);
@@ -397,6 +405,39 @@ export function AIChatbot() {
       title: "Algorithm Loaded",
       description: "The trading algorithm has been loaded and is ready for execution.",
     });
+  };
+
+  // File attachment placeholder: read text from a selected file and store it as attachmentText
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleSelectFile = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setAttachmentName(f.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = String(reader.result || "");
+        // store the file text as a placeholder for future upload parsing
+        setAttachmentText(text.slice(0, 20000)); // limit size for safety
+        toast({ title: "Attachment Loaded", description: `${f.name} attached as text.` });
+      } catch (err) {
+        console.error("Failed to read file:", err);
+        toast({ title: "Attachment Failed", description: "Could not read the selected file." , variant: 'destructive'});
+      }
+    };
+    reader.readAsText(f);
+    // reset input so same file can be reselected later
+    e.currentTarget.value = "";
+  };
+
+  const clearAttachment = () => {
+    setAttachmentText(null);
+    setAttachmentName(null);
   };
 
   const handleApproveSuggestion = (suggestion: OptimizationSuggestion) => {
@@ -644,20 +685,33 @@ export function AIChatbot() {
               className="min-h-[44px] max-h-[120px] resize-none"
               data-testid="input-chat-message"
             />
-            <Button
-              onClick={handleSubmit}
-              disabled={!input.trim() || !selectedMarket || sendMessageMutation.isPending}
-              size="icon"
-              className="h-11 w-11"
-              data-testid="button-send-message"
-            >
-              {sendMessageMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-            </Button>
+            <div className="flex items-center gap-2">
+              <input ref={fileInputRef} type="file" accept=".txt,.md,.json" onChange={handleFileChange} className="hidden" />
+              <Button onClick={handleSelectFile} variant="outline" size="sm" className="h-11 text-xs" data-testid="button-attach-file">Attach</Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={!input.trim() || !selectedMarket || sendMessageMutation.isPending}
+                size="icon"
+                className="h-11 w-11"
+                data-testid="button-send-message"
+              >
+                {sendMessageMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
           </div>
+          {attachmentName && (
+            <div className="flex items-center justify-between gap-2 mt-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <Code className="h-3 w-3" />
+                <span>Attached: {attachmentName}</span>
+              </div>
+              <Button variant="ghost" size="sm" onClick={clearAttachment}>Remove</Button>
+            </div>
+          )}
           {activeAlgorithm && (
             <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
               <Code className="h-3 w-3" />

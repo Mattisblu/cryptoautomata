@@ -1,28 +1,38 @@
-import OpenAI from "openai";
+import axios from "axios";
 import pLimit from "p-limit";
 import pRetry, { AbortError } from "p-retry";
 import type { TradingAlgorithm, TradingMode, ExecutionMode, Ticker, Kline, Position, TradingRule, RiskManagement, RiskParameters } from "@shared/schema";
 import { randomUUID } from "crypto";
 
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-// This is using Replit's AI Integrations service, which provides OpenAI-compatible API access without requiring your own OpenAI API key.
-const openai = new OpenAI({
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-});
+// Ollama integration (default host and model)
+const OLLAMA_HOST = process.env.OLLAMA_URL || "http://localhost:11434";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "glm-4.7-flash:latest";
 
-// Rate limiter for API calls
 const limit = pLimit(2);
 
-// Helper function to check if error is rate limit or quota violation
-function isRateLimitError(error: any): boolean {
-  const errorMsg = error?.message || String(error);
-  return (
-    errorMsg.includes("429") ||
-    errorMsg.includes("RATELIMIT_EXCEEDED") ||
-    errorMsg.toLowerCase().includes("quota") ||
-    errorMsg.toLowerCase().includes("rate limit")
-  );
+async function ollamaChat(messages: { role: string; content: string }[]): Promise<string> {
+  try {
+    const url = `${OLLAMA_HOST}/api/chat`;
+    const response = await axios.post(url, {
+      model: OLLAMA_MODEL,
+      messages,
+      stream: false,
+    });
+    // Ollama may return different shapes; try common fields
+    return response.data?.message?.content || response.data?.response || response.data?.output || "";
+  } catch (error: any) {
+    console.error("Ollama chat error:", error?.response?.data || error?.message || error);
+    throw error;
+  }
+}
+
+export async function ollamaHealth(): Promise<boolean> {
+  try {
+    const resp = await axios.get(`${OLLAMA_HOST}/api/status`);
+    return resp.status === 200;
+  } catch (e) {
+    return false;
+  }
 }
 
 interface MarketContext {
@@ -259,34 +269,20 @@ export async function analyzeAndRespond(
   context: MarketContext
 ): Promise<ChatResponse> {
   const contextInfo = buildContextInfo(context);
-
   const FALLBACK_MESSAGE = "I apologize, but I'm having trouble analyzing the market right now. Please try again in a moment. You can also check the chart timeframe and current price action for immediate insights.";
-  
   let response: string = FALLBACK_MESSAGE;
-  
   try {
     const result = await limit(() =>
       pRetry(
         async () => {
-          const completion = await openai.chat.completions.create({
-            model: "gpt-4o", // Using gpt-4o for more reliable responses
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              {
-                role: "user",
-                content: `${contextInfo}\n\nUser request: ${userMessage}`,
-              },
-            ],
-            max_completion_tokens: 4096,
-          });
-          const content = completion.choices[0]?.message?.content;
-          
-          // Validate non-empty response - retry if empty
+          const content = await ollamaChat([
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: `${contextInfo}\n\nUser request: ${userMessage}` },
+          ]);
           if (!content || content.trim().length === 0) {
-            console.warn("OpenAI returned empty response, retrying...");
+            console.warn("Ollama returned empty response, retrying...");
             throw new Error("Empty response from AI");
           }
-          
           return content;
         },
         {
@@ -296,27 +292,41 @@ export async function analyzeAndRespond(
           factor: 2,
           onFailedAttempt: (attemptInfo) => {
             const errorMessage = attemptInfo.error?.message || String(attemptInfo.error);
-            console.warn(`AI attempt failed: ${errorMessage}`);
-            // Only abort for non-retryable errors (not rate limits or empty responses)
-            if (!isRateLimitError(attemptInfo.error) && !errorMessage.includes("Empty response")) {
-              throw new AbortError(attemptInfo.error?.message || "Unknown error");
+            console.warn(`Ollama attempt failed: ${errorMessage}`);
+            if (!errorMessage.includes("Empty response")) {
+              throw new AbortError(errorMessage);
             }
           },
         }
       )
     );
-    
-    // Only use result if it's a non-empty string
     if (result && typeof result === 'string' && result.trim().length > 0) {
       response = result;
     }
   } catch (error) {
-    console.error("AI analysis failed after retries:", error);
-    // response already defaults to FALLBACK_MESSAGE
+    console.error("Ollama analysis failed after retries:", error);
   }
+    console.debug("[LLM] Raw response preview:", response.slice(0, 200));
+  let algorithm = extractAlgorithmFromResponse(response, context);
 
-  // Parse the response to extract algorithm if present
-  const algorithm = extractAlgorithmFromResponse(response, context);
+  // If parsing failed, attempt a single JSON-only re-request to the model
+  if (!algorithm) {
+    try {
+      console.debug('[LLM] No algorithm parsed — performing JSON-only re-request');
+      const followup = await ollamaChat([
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `${contextInfo}\n\nUser request: ${userMessage}` },
+        { role: 'user', content: 'Please output only the algorithm JSON object, with no explanation and no markdown. Ensure keys include name, rules (array), and riskManagement where possible.' },
+      ]);
+      if (followup && followup.trim().length > 0) {
+        response = followup;
+        console.debug('[LLM] Follow-up raw preview:', response.slice(0, 200));
+        algorithm = extractAlgorithmFromResponse(response, context);
+      }
+    } catch (err) {
+      console.warn('[LLM] JSON-only re-request failed:', err);
+    }
+  }
 
   return {
     message: response,
@@ -434,6 +444,25 @@ function extractAlgorithmFromResponse(
   context: MarketContext
 ): TradingAlgorithm | undefined {
   let jsonString: string | undefined;
+
+  // If the model returned a JSON-encoded string (e.g. "{\"id\":...}\""), try to unwrap it first
+  try {
+    const maybe = JSON.parse(response);
+    if (typeof maybe === 'object' && maybe !== null) {
+      // Direct JSON object returned by the model
+      const parsedObj = maybe as any;
+      if ((parsedObj.rules && Array.isArray(parsedObj.rules)) || parsedObj.riskManagement) {
+        // Use the object directly
+        const tmp = JSON.stringify(parsedObj);
+        response = tmp;
+      }
+    } else if (typeof maybe === 'string') {
+      // Model returned a JSON string containing the object; unwrap
+      response = maybe;
+    }
+  } catch (err) {
+    // not JSON-parsable at top level - continue with heuristics
+  }
   
   // Pattern 1: ```json code block
   const jsonCodeBlockMatch = response.match(/```json\s*([\s\S]*?)\s*```/);
@@ -479,7 +508,7 @@ function extractAlgorithmFromResponse(
   }
   
   if (!jsonString) {
-    console.log("No algorithm JSON found in response");
+    console.log("No algorithm JSON found in response. Preview:", response.slice(0, 400));
     return undefined;
   }
 
@@ -495,40 +524,69 @@ function extractAlgorithmFromResponse(
 
     // Always generate a proper UUID - AI often returns placeholder IDs like "unique-uuid"
     const algorithmId = randomUUID();
-    
-    // Validate and create a proper algorithm structure
-    const algorithm: TradingAlgorithm = {
-      id: algorithmId,
-      name: parsed.name || "AI Generated Strategy",
-      version: parsed.version || 1,
-      createdAt: parsed.createdAt || Date.now(),
-      updatedAt: Date.now(),
-      mode: parsed.mode || context.tradingMode || "ai-trading",
-      symbol: parsed.symbol || context.symbol || "BTCUSDT",
-      rules: (parsed.rules || []).map((rule: any, index: number) => ({
+
+    // Normalize alternative keys (strategy_name, risk_management, etc.)
+    const name = parsed.name || parsed.strategy_name || parsed.strategyName || "AI Generated Strategy";
+    const version = parsed.version || parsed.v || 1;
+    const createdAt = parsed.createdAt || parsed.created_at || Date.now();
+    const mode = parsed.mode || context.tradingMode || "ai-trading";
+    const symbol = parsed.symbol || context.symbol || parsed.market || "BTCUSDT";
+
+    // Build rules: prefer explicit `rules`, else convert from `entry_conditions` if present
+    let rules: TradingRule[] = [];
+    if (Array.isArray(parsed.rules) && parsed.rules.length > 0) {
+      rules = parsed.rules.map((rule: any, index: number) => ({
         id: rule.id || randomUUID(),
-        condition: rule.condition || "",
-        action: rule.action || "hold",
+        condition: rule.condition || rule.trigger || JSON.stringify(rule),
+        action: (rule.action || rule.type || 'hold') as any,
         quantity: rule.quantity,
         quantityPercent: rule.quantityPercent,
-        priceType: rule.priceType || "market",
+        priceType: rule.priceType || 'market',
         limitOffset: rule.limitOffset,
         priority: rule.priority ?? index + 1,
-      })) as TradingRule[],
-      riskManagement: {
-        maxPositionSize: parsed.riskManagement?.maxPositionSize ?? 1000,
-        maxLeverage: parsed.riskManagement?.maxLeverage ?? 10,
-        stopLossPercent: parsed.riskManagement?.stopLossPercent ?? null,
-        takeProfitPercent: parsed.riskManagement?.takeProfitPercent ?? null,
-        maxDailyLoss: parsed.riskManagement?.maxDailyLoss ?? 100,
-        trailingStop: parsed.riskManagement?.trailingStop ?? false,
-        trailingStopPercent: parsed.riskManagement?.trailingStopPercent ?? null,
-        tradeCooldownSeconds: parsed.riskManagement?.tradeCooldownSeconds ?? null,
-        maxTradesPerHour: parsed.riskManagement?.maxTradesPerHour ?? null,
-        minHoldTimeSeconds: parsed.riskManagement?.minHoldTimeSeconds ?? null,
-        maxConcurrentPositions: parsed.riskManagement?.maxConcurrentPositions ?? null,
-      } as RiskManagement,
-      status: "active",
+      }));
+    } else if (parsed.entry_conditions) {
+      // Try to derive a simple rule from entry_conditions.long
+      const ec = parsed.entry_conditions;
+      if (ec.long && typeof ec.long === 'object') {
+        rules.push({
+          id: randomUUID(),
+          condition: ec.long.trigger || 'immediate',
+          action: 'buy',
+          quantityPercent: undefined,
+          priceType: ec.long.order_type || 'market',
+          priority: 1,
+        });
+      }
+    }
+
+    // Risk management normalization
+    const rmSrc = parsed.riskManagement || parsed.risk_management || parsed.risk || {};
+    const riskManagement: RiskManagement = {
+      maxPositionSize: rmSrc.maxPositionSize ?? rmSrc.max_position_size ?? 1000,
+      maxLeverage: rmSrc.maxLeverage ?? rmSrc.max_leverage ?? 10,
+      stopLossPercent: rmSrc.stopLossPercent ?? rmSrc.stop_loss_percent ?? null,
+      takeProfitPercent: rmSrc.takeProfitPercent ?? rmSrc.take_profit_percent ?? null,
+      maxDailyLoss: rmSrc.maxDailyLoss ?? rmSrc.max_daily_loss ?? 100,
+      trailingStop: rmSrc.trailingStop ?? rmSrc.trailing_stop ?? false,
+      trailingStopPercent: rmSrc.trailingStopPercent ?? rmSrc.trailing_stop_percent ?? null,
+      tradeCooldownSeconds: rmSrc.tradeCooldownSeconds ?? rmSrc.trade_cooldown_seconds ?? null,
+      maxTradesPerHour: rmSrc.maxTradesPerHour ?? rmSrc.max_trades_per_hour ?? null,
+      minHoldTimeSeconds: rmSrc.minHoldTimeSeconds ?? rmSrc.min_hold_time_seconds ?? null,
+      maxConcurrentPositions: rmSrc.maxConcurrentPositions ?? rmSrc.max_concurrent_positions ?? null,
+    };
+
+    const algorithm: TradingAlgorithm = {
+      id: algorithmId,
+      name,
+      version,
+      createdAt,
+      updatedAt: Date.now(),
+      mode,
+      symbol,
+      rules,
+      riskManagement,
+      status: 'active',
     };
 
     return algorithm;
@@ -556,22 +614,17 @@ ${klines
   .join("\n")}
 
 Provide a quick market sentiment (bullish/bearish/neutral) and key level to watch.`;
-
   const response = await limit(() =>
     pRetry(
       async () => {
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o", // Using gpt-4o for more reliable responses
-          messages: [
-            {
-              role: "system",
-              content: "You are a concise crypto trading analyst. Give brief, actionable insights.",
-            },
-            { role: "user", content: prompt },
-          ],
-          max_completion_tokens: 256,
-        });
-        return completion.choices[0]?.message?.content || "";
+        const content = await ollamaChat([
+          {
+            role: "system",
+            content: "You are a concise crypto trading analyst. Give brief, actionable insights.",
+          },
+          { role: "user", content: prompt },
+        ]);
+        return content || "";
       },
       {
         retries: 3,
@@ -579,13 +632,10 @@ Provide a quick market sentiment (bullish/bearish/neutral) and key level to watc
         maxTimeout: 16000,
         factor: 2,
         onFailedAttempt: (attemptInfo) => {
-          if (!isRateLimitError(attemptInfo.error)) {
-            throw new AbortError(attemptInfo.error?.message || "Unknown error");
-          }
+          throw new AbortError(attemptInfo.error?.message || "Unknown error");
         },
       }
     )
   );
-
   return response;
 }

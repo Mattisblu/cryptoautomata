@@ -179,11 +179,17 @@
 
 @layer base {
   * {
-    @apply border-border;
+    /* Tailwind's `border-border` utility sometimes isn't generated in this setup.
+       Use a direct CSS fallback that references the theme CSS variable. */
+    border-color: hsl(var(--border) / 1);
   }
 
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
   }
 }
 

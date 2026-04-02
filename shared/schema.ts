@@ -382,7 +382,7 @@ export interface Market {
 }
 
 // Trading modes
-export const tradingModes = ["ai-trading", "ai-scalping", "manual"] as const;
+export const tradingModes = ["ai-trading", "ai-scalping", "manual", "agent"] as const;
 export type TradingMode = typeof tradingModes[number];
 
 // Order types
@@ -501,6 +501,8 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   algorithmJson?: TradingAlgorithm;
+  // Optional attached or pasted document text provided by the user
+  attachmentText?: string;
 }
 
 // Trading algorithm schema (AI-generated)
@@ -515,6 +517,7 @@ export interface TradingAlgorithm {
   rules: TradingRule[];
   riskManagement: RiskManagement;
   status: "active" | "paused" | "stopped";
+  source?: 'algorithm' | 'proposal';
 }
 
 export interface TradingRule {
@@ -689,6 +692,7 @@ export interface TradeCycleState {
   algorithmId?: string;
   sessionId?: string; // Links to running strategies table for tracking
   lastUpdate?: number;
+  timeframe?: string;
 }
 
 // Connection status
@@ -697,7 +701,8 @@ export type ConnectionStatus = typeof connectionStatuses[number];
 
 export interface ConnectionState {
   status: ConnectionStatus;
-  exchange: Exchange;
+  exchange: Exchange; 
+  connected: boolean;
   lastHeartbeat?: number;
   error?: string;
 }
@@ -729,6 +734,7 @@ export const insertChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
   algorithmJson: z.any().optional(),
+  attachmentText: z.string().optional(),
 });
 
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;

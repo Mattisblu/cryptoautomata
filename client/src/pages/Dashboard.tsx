@@ -1,3 +1,6 @@
+import { AgentTradingPanel } from "@/components/AgentTradingPanel";
+import AgentMessagePanel from "@/components/AgentMessagePanel";
+import ProposalsPanel from "@/components/ProposalsPanel";
 import { useEffect, useState } from "react";
 import { ExchangeSelector } from "@/components/ExchangeSelector";
 import { MarketSelector } from "@/components/MarketSelector";
@@ -8,7 +11,6 @@ import { KlineChart } from "@/components/KlineChart";
 import { TickerBar } from "@/components/TickerBar";
 import { PositionsTable } from "@/components/PositionsTable";
 import { OrdersTable } from "@/components/OrdersTable";
-import { ManualTradingPanel } from "@/components/ManualTradingPanel";
 import { CredentialsForm } from "@/components/CredentialsForm";
 import { TradeCycleControls } from "@/components/TradeCycleControls";
 import { AIChatbot } from "@/components/AIChatbot";
@@ -45,8 +47,28 @@ export default function Dashboard() {
     }
   }, [isManualMode, sidebarTab]);
 
-  // Connect to WebSocket for real-time updates
-  useWebSocket();
+  // Connect to WebSocket for real-time updates (pass agent message handler)
+  const { addAgentMessage, addChatMessage } = useTradingContext();
+
+  // Agent messages arrive via WebSocket; also add execution results to chat
+  useWebSocket((msg) => {
+    try {
+      addAgentMessage(msg);
+
+      if (msg && msg.type === "RESPONSE_EXECUTE_TRADE") {
+        const payload = msg.payload || {};
+        const success = payload.success;
+        const orderId = payload.orderId || payload.order?.id || null;
+        const content = success
+          ? `Execution result: order executed successfully${orderId ? ` (orderId: ${orderId})` : ""}.`
+          : `Execution result: failed to place order${orderId ? ` (orderId: ${orderId})` : ""}.`;
+
+        addChatMessage({ role: "assistant", content });
+      }
+    } catch (e) {
+      console.error("Failed to handle agent websocket message:", e);
+    }
+  });
 
   // Fetch positions
   const { data: positionsData } = useQuery<{ positions: Position[] }>({
@@ -227,8 +249,15 @@ export default function Dashboard() {
               {/* Risk Parameters (AI modes only) */}
               {!isManualMode && <RiskParametersCard />}
 
-              {/* Manual Trading Panel (Manual mode only) */}
-              {isManualMode && <ManualTradingPanel />}
+              {/* Agent Trading Panel (used for Agent mode and replaces Manual mode) */}
+              {(tradingMode === "agent" || isManualMode) && (
+                <div className="space-y-3">
+                  <AgentTradingPanel />
+                  <ProposalsPanel />
+                </div>
+              )}
+              {/* Agent messages panel - show orchestrator step updates */}
+              <AgentMessagePanel />
             </div>
           )}
 
@@ -302,8 +331,8 @@ export default function Dashboard() {
                   {/* Risk Parameters (AI modes only) */}
                   {!isManualMode && <RiskParametersCard />}
 
-                  {/* Manual Trading Panel (Manual mode only) */}
-                  {isManualMode && <ManualTradingPanel />}
+                  {/* Agent Trading Panel (used for Agent mode and replaces Manual mode) */}
+                  {(tradingMode === "agent" || isManualMode) && <AgentTradingPanel />}
                 </div>
               )}
 

@@ -79,6 +79,10 @@ interface TradingContextValue {
   chatMessages: ChatMessage[];
   addChatMessage: (message: Omit<ChatMessage, "id" | "timestamp">) => void;
   clearChatMessages: () => void;
+  // Agent messages coming from orchestrator
+  agentMessages: any[];
+  addAgentMessage: (msg: any) => void;
+  clearAgentMessages: () => void;
   activeAlgorithm: TradingAlgorithm | null;
   setActiveAlgorithm: (algo: TradingAlgorithm | null) => void;
   
@@ -226,6 +230,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   
   // Chat & Algorithms
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  // Agent messages (per-step logs from orchestrator)
+  const [agentMessages, setAgentMessages] = useState<any[]>([]);
   const [activeAlgorithm, setActiveAlgorithmState] = useState<TradingAlgorithm | null>(() => {
     // Initialize from localStorage
     try {
@@ -266,6 +272,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
+  // No global bridge: WebSocket hook will receive addAgentMessage directly from components
   
   // Trade cycle
   const [tradeCycleState, setTradeCycleState] = useState<TradeCycleState>({
@@ -281,6 +288,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [connectionState, setConnectionState] = useState<ConnectionState>({
     status: "disconnected",
     exchange: "coinstore",
+    connected: false,
   });
   
   // Credentials
@@ -300,6 +308,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   
   const clearChatMessages = useCallback(() => {
     setChatMessages([]);
+  }, []);
+
+  const addAgentMessage = useCallback((msg: any) => {
+    setAgentMessages(prev => [...prev, msg]);
+  }, []);
+
+  const clearAgentMessages = useCallback(() => {
+    setAgentMessages([]);
   }, []);
   
   const addOptimizationSuggestion = useCallback((suggestion: Omit<OptimizationSuggestion, "id" | "timestamp">) => {
@@ -380,6 +396,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         orders,
         setOrders,
         chatMessages,
+          agentMessages,
+          addAgentMessage,
+          clearAgentMessages,
         addChatMessage,
         clearChatMessages,
         activeAlgorithm,

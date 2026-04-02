@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "npm",
+			"script": "dev",
+			"path": "CryptoAutomata",
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"label": "npm: dev - CryptoAutomata",
+			"detail": "NODE_ENV=development tsx server/index-dev.ts"
+		}
+	]
+}

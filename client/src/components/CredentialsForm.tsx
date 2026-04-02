@@ -58,6 +58,7 @@ export function CredentialsForm() {
         status: "connected",
         exchange: variables.exchange,
         lastHeartbeat: Date.now(),
+        connected: true,
       });
       toast({
         title: "Connected Successfully",
@@ -69,6 +70,7 @@ export function CredentialsForm() {
         status: "error",
         exchange: selectedExchange || "coinstore",
         error: error.message,
+        connected: false,
       });
       toast({
         title: "Connection Failed",
@@ -87,6 +89,7 @@ export function CredentialsForm() {
       setConnectionState({
         status: "disconnected",
         exchange: selectedExchange || "coinstore",
+        connected: false,
       });
       form.reset();
       toast({
@@ -100,6 +103,7 @@ export function CredentialsForm() {
     setConnectionState({
       status: "connecting",
       exchange: data.exchange,
+      connected: false,
     });
     connectMutation.mutate({
       ...data,
