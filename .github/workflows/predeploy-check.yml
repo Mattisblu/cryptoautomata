@@ -1,0 +1,48 @@
+name: Predeploy Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Start Ollama container
+        run: docker run -d --name ollama -p 11434:11434 ollama/ollama
+
+      - name: Pull model
+        run: docker exec ollama ollama pull qwen2.5:0.5b
+
+      - name: Start app server
+        run: OLLAMA_MODEL=qwen2.5:0.5b npm run dev &
+
+      - name: Wait for API health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:5000/api/llm/health > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server health check failed"
+          exit 1
+
+      - name: Run predeploy gate
+        run: OLLAMA_MODEL=qwen2.5:0.5b npm run predeploy:check

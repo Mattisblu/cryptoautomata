@@ -11,7 +11,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install all deps (including dev) so `npm run dev` works inside container
-RUN npm ci --quiet
+# Use `npm install` here to avoid failing when package-lock.json is out of sync in dev
+RUN npm install --legacy-peer-deps --no-audit --no-fund
 
 # Copy remaining files (optional - in dev we'll usually mount source over this)
 COPY . .

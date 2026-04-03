@@ -6,7 +6,8 @@ import { randomUUID } from "crypto";
 
 // Ollama integration (default host and model)
 const OLLAMA_HOST = process.env.OLLAMA_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "glm-4.7-flash:latest";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "kimi-k2.5:cloud";
+const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS || 30000);
 
 const limit = pLimit(2);
 
@@ -17,6 +18,8 @@ async function ollamaChat(messages: { role: string; content: string }[]): Promis
       model: OLLAMA_MODEL,
       messages,
       stream: false,
+    }, {
+      timeout: OLLAMA_TIMEOUT_MS,
     });
     // Ollama may return different shapes; try common fields
     return response.data?.message?.content || response.data?.response || response.data?.output || "";
@@ -570,6 +573,8 @@ function extractAlgorithmFromResponse(
       maxDailyLoss: rmSrc.maxDailyLoss ?? rmSrc.max_daily_loss ?? 100,
       trailingStop: rmSrc.trailingStop ?? rmSrc.trailing_stop ?? false,
       trailingStopPercent: rmSrc.trailingStopPercent ?? rmSrc.trailing_stop_percent ?? null,
+      autoStopLoss: rmSrc.autoStopLoss ?? rmSrc.auto_stop_loss ?? (rmSrc.stopLossPercent != null || rmSrc.stop_loss_percent != null),
+      autoTakeProfit: rmSrc.autoTakeProfit ?? rmSrc.auto_take_profit ?? (rmSrc.takeProfitPercent != null || rmSrc.take_profit_percent != null),
       tradeCooldownSeconds: rmSrc.tradeCooldownSeconds ?? rmSrc.trade_cooldown_seconds ?? null,
       maxTradesPerHour: rmSrc.maxTradesPerHour ?? rmSrc.max_trades_per_hour ?? null,
       minHoldTimeSeconds: rmSrc.minHoldTimeSeconds ?? rmSrc.min_hold_time_seconds ?? null,

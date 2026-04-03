@@ -1,7 +1,6 @@
 import { getTool } from './agentTools/toolRegistry';
 import type { AgentMessage } from './agents/workflowSchema';
-import { analyzeAndRespond } from './openai';
-import { exchangeService } from './exchangeService';
+import { invokeLLMTool } from './agentTools/llmTool';
 import { storage } from './storage';
 
 // Simple orchestrator that chooses a tool plan and executes tools in sequence.
@@ -29,104 +28,43 @@ export async function handleTradeRequest(
     if (onMessage) onMessage(algoMsg);
   }
 
-  // If user provided a high-level objective, consult the LLM to generate/propose a strategy
-  if (request.objective) {
+  // If user provided a high-level objective, consult the LLM via the dedicated llmTool wrapper.
+  // Skip this when an approved algorithm is already attached (approve flow).
+  if (request.objective && !(request.algorithm && request.autoApprove)) {
     try {
-      // Build a lightweight market context for the LLM
-      const tickerResult = await exchangeService.getTicker(request.exchange, request.symbol).catch(() => null);
-      const klinesResult = await exchangeService.getKlines(request.exchange, request.symbol, request.timeframe || '15m', 100).catch(() => null);
-      const positions = await storage.getPositions(request.exchange).catch(() => []);
-      const riskParams = await storage.getRiskParameters().catch(() => undefined);
+      const llmResult = await invokeLLMTool(request);
+      const proposalMsg = llmResult.message;
+      results.push(proposalMsg);
+      if (onMessage) onMessage(proposalMsg);
 
-      const aiContext = {
-        symbol: request.symbol,
-        ticker: tickerResult?.ticker,
-        klines: klinesResult?.klines,
-        positions,
-        tradingMode: request.tradingMode,
-        timeframe: request.timeframe,
-        riskParameters: riskParams ?? undefined,
-        executionMode: request.executionMode,
-      };
-
-      const llmResp = await analyzeAndRespond(request.objective, aiContext);
-
-      // If the LLM returned an algorithm, present it as a proposal
-      if (llmResp.algorithm) {
-        // Persist proposal so UI can list and approve it. Prefer updating an existing
-        // pending proposal (created by the route) to avoid duplicates.
-        try {
-          const existing = (await storage.getProposals()).find((p: any) =>
-            p.status === 'pending' &&
-            p.userId === (request.userId || 'unknown') &&
-            p.request?.objective === request.objective &&
-            p.request?.symbol === request.symbol &&
-            p.request?.exchange === request.exchange
-          );
-
-          let proposal: any;
-          if (existing) {
-            proposal = await storage.updateProposal(existing.id, {
-              algorithm: llmResp.algorithm,
-              message: llmResp.message || 'analysis complete',
-            });
-          } else {
-            proposal = await storage.createProposal({
-              userId: request.userId || 'unknown',
-              request,
-              algorithm: llmResp.algorithm,
-              message: llmResp.message || undefined,
-              status: request.autoApprove ? 'approved' : 'pending',
-            });
-          }
-
-          const proposalMsg: AgentMessage = {
-            id: `${Date.now()}-proposal`,
-            from: ("Manager" as any),
-            to: ("Manager" as any),
-            type: 'NOTIFY',
-            payload: { proposalId: proposal.id, proposal: llmResp.algorithm, message: llmResp.message, requiresApproval: !request.autoApprove },
-            timestamp: Date.now(),
-          } as AgentMessage;
-          results.push(proposalMsg);
-          if (onMessage) onMessage(proposalMsg);
-
-          // If user allowed auto-approve, attach algorithm to context for tools to use
-          if (request.autoApprove) {
+      if (llmResult.proposalId) {
+        // Algorithm was generated and persisted
+        if (request.autoApprove) {
+          // Load the algorithm so downstream tools can use it
+          const proposal = await storage.getProposal(llmResult.proposalId);
+          if (proposal?.algorithm) {
             context['algorithm'] = {
               id: `${Date.now()}-algo-context`,
-              from: ("Manager" as any),
-              to: ("Manager" as any),
+              from: 'Manager' as any,
+              to: 'Manager' as any,
               type: 'NOTIFY',
-              payload: llmResp.algorithm,
+              payload: proposal.algorithm,
               timestamp: Date.now(),
             } as AgentMessage;
-          } else {
-            // If not auto-approved, stop here and wait for user approval path
-            return results;
           }
-        } catch (err) {
-          console.error('[Orchestrator] Failed to persist proposal:', err);
+        } else {
+          // Pending approval — stop here, UI will trigger approve/reject
+          return results;
         }
       } else {
-        // No algorithm produced: send LLM message back for user's review
-        const infoMsg: AgentMessage = {
-          id: `${Date.now()}-llm-info`,
-          from: ("Manager" as any),
-          to: ("Manager" as any),
-          type: 'NOTIFY',
-          payload: { message: llmResp.message, requiresApproval: true },
-          timestamp: Date.now(),
-        } as AgentMessage;
-        results.push(infoMsg);
-        if (onMessage) onMessage(infoMsg);
+        // No algorithm — informational only, stop pipeline
         return results;
       }
     } catch (err) {
       const errMsg: AgentMessage = {
         id: `${Date.now()}-error-llm`,
-        from: ("Manager" as any),
-        to: ("Manager" as any),
+        from: 'Manager' as any,
+        to: 'Manager' as any,
         type: 'ERROR',
         payload: (err as Error).message || String(err),
         timestamp: Date.now(),
