@@ -55,4 +55,9 @@ jobs:
           exit 1
 
       - name: Run predeploy gate
-        run: OLLAMA_MODEL=qwen2.5:0.5b npm run predeploy:check
+        run: |
+          OLLAMA_MODEL=qwen2.5:0.5b \
+          PROPOSAL_TIMEOUT_MS=90000 \
+          PROPOSAL_RETRY_ATTEMPTS=5 \
+          WS_EVENT_TIMEOUT_MS=120000 \
+          npm run predeploy:check
