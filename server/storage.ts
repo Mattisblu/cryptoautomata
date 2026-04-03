@@ -1,4 +1,8 @@
 import { randomUUID } from "crypto";
+import { EventEmitter } from "events";
+
+/** Emits 'proposal:created' and 'proposal:updated' events for WebSocket broadcast. */
+export const proposalEvents = new EventEmitter();
 import type {
   Exchange,
   Market,
@@ -653,6 +657,7 @@ export class MemStorage implements IStorage {
       message: proposal.message || undefined,
     };
     this.proposals.push(p);
+    proposalEvents.emit('proposal:created', p);
     return p;
   }
 
@@ -669,6 +674,7 @@ export class MemStorage implements IStorage {
     if (!p) return null;
     p.status = status;
     p.updatedAt = Date.now();
+    proposalEvents.emit('proposal:updated', p);
     return p;
   }
 
@@ -677,6 +683,7 @@ export class MemStorage implements IStorage {
     if (!p) return null;
     Object.assign(p, updates);
     p.updatedAt = Date.now();
+    proposalEvents.emit('proposal:updated', p);
     return p;
   }
 

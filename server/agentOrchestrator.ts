@@ -1,6 +1,7 @@
 import { getTool } from './agentTools/toolRegistry';
 import type { AgentMessage } from './agents/workflowSchema';
 import { invokeLLMTool } from './agentTools/llmTool';
+import { planWithLLM } from './agentTools/llmPlanner';
 import { storage } from './storage';
 
 // Simple orchestrator that chooses a tool plan and executes tools in sequence.
@@ -10,7 +11,7 @@ export async function handleTradeRequest(
   onMessage?: (msg: AgentMessage) => void
 ): Promise<AgentMessage[]> {
   console.log(`[Orchestrator] Received trade request: ${JSON.stringify({ symbol: request.symbol, exchange: request.exchange, side: request.side, quantity: request.quantity, objective: !!request.objective })}`);
-  const plan = selectPlanForRequest(request);
+  const plan = await planWithLLM(request);
   const context: Record<string, AgentMessage | undefined> = {};
   const results: AgentMessage[] = [];
 
@@ -118,17 +119,6 @@ export async function handleTradeRequest(
 
   console.log(`[Orchestrator] Completed plan with ${results.length} messages`);
   return results;
-}
-
-function selectPlanForRequest(request: any): string[] {
-  // Default plan: market -> risk -> execution
-  // If running in `agent` trading mode and no algorithm provided, allow the
-  // agent to call the AI tool autonomously as the first step.
-  if (!request.algorithm && request.tradingMode === 'agent') {
-    return ['ai', 'market', 'risk', 'execution'];
-  }
-  // In future: consult LLM or policy engine to choose alternative tools
-  return ['market', 'risk', 'execution'];
 }
 
 // Accept `algorithm` passed directly on the request for approve flow

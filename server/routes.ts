@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "crypto";
-import { storage } from "./storage";
+import { storage, proposalEvents } from "./storage";
 import { exchangeService, createTickerStream, createKlinesStream } from "./exchangeService";
 import { analyzeAndRespond, ollamaHealth } from "./openai";
 import { tradingBot } from "./tradingBot";
@@ -128,6 +128,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
   }
+
+  // Forward storage-level proposal events to all WebSocket clients.
+  // This allows llmTool.ts / orchestrator to indirectly trigger broadcasts.
+  proposalEvents.on('proposal:created', (proposal) => {
+    broadcast('proposal', { type: 'proposal.created', proposal });
+  });
+  proposalEvents.on('proposal:updated', (proposal) => {
+    broadcast('proposal', { type: 'proposal.updated', proposal });
+  });
 
   // ============ AUTH ROUTES ============
   

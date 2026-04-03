@@ -11,7 +11,8 @@
     "db:push": "drizzle-kit push",
     "smoke:agent": "node server/scripts/test-agent-proposal-flow.js",
     "smoke:agent:lifecycle": "node server/scripts/test-agent-proposal-lifecycle.js",
-    "predeploy:check": "npm run check && npm run smoke:agent && npm run smoke:agent:lifecycle"
+    "smoke:ws": "node server/scripts/test-websocket-events.js",
+    "predeploy:check": "npm run check && npm run smoke:agent && npm run smoke:agent:lifecycle && npm run smoke:ws"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

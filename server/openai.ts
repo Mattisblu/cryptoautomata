@@ -8,6 +8,8 @@ import { randomUUID } from "crypto";
 const OLLAMA_HOST = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "kimi-k2.5:cloud";
 const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS || 30000);
+// Cloud models require an Authorization header (any non-empty value satisfies the auth check)
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "ollama";
 
 const limit = pLimit(2);
 
@@ -20,11 +22,16 @@ async function ollamaChat(messages: { role: string; content: string }[]): Promis
       stream: false,
     }, {
       timeout: OLLAMA_TIMEOUT_MS,
+      headers: {
+        Authorization: `Bearer ${OLLAMA_API_KEY}`,
+      },
     });
     // Ollama may return different shapes; try common fields
     return response.data?.message?.content || response.data?.response || response.data?.output || "";
   } catch (error: any) {
-    console.error("Ollama chat error:", error?.response?.data || error?.message || error);
+    const errData = error?.response?.data;
+    const errStatus = error?.response?.status;
+    console.error(`Ollama chat error [HTTP ${errStatus}]:`, typeof errData === 'object' ? JSON.stringify(errData) : (errData || error?.message));
     throw error;
   }
 }
