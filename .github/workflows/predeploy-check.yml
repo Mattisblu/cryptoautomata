@@ -27,8 +27,18 @@ jobs:
       - name: Start Ollama container
         run: docker run -d --name ollama -p 11434:11434 ollama/ollama
 
-      - name: Pull model
-        run: docker exec ollama ollama pull qwen2.5:0.5b
+      - name: Pull model (with retries)
+        run: |
+          for i in 1 2 3; do
+            echo "Pull attempt $i/3"
+            if docker exec ollama ollama pull qwen2.5:0.5b; then
+              docker exec ollama ollama list
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Failed to pull qwen2.5:0.5b after 3 attempts"
+          exit 1
 
       - name: Start app server
         run: OLLAMA_MODEL=qwen2.5:0.5b npm run dev &
